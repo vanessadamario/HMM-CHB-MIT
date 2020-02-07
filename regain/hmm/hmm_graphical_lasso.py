@@ -32,10 +32,12 @@ from __future__ import division
 import warnings
 
 import numpy as np
+from joblib import Parallel, delayed
 from regain.covariance.graphical_lasso_ import GraphicalLasso, graphical_lasso
 from scipy.stats import multivariate_normal
 from sklearn.cluster import KMeans
 from sklearn.covariance import empirical_covariance
+from sklearn.mixture import GaussianMixture
 from sklearn.utils.validation import check_array
 
 
@@ -57,10 +59,8 @@ def scaled_forward_backward(X, pis, probabilities, A):
         alphas[n, :] /= cs[n]
     for n in range(N - 2, -1, -1):
         for k in range(K):
-            betas[n, k] = np.sum(
-                betas[n + 1, :] * probabilities[n + 1, :]
-                *  # non sono sicura che ci vada il k in probabilities
-                A[k, :])
+            betas[n, k] = np.sum(betas[n + 1, :] * probabilities[n + 1, :] *
+                                 A[k, :])
         betas[n, :] /= cs[n + 1]
     return alphas, betas, cs
 
@@ -80,10 +80,8 @@ def forward_backward(X, pis, probabilities, A):
                 alphas[n - 1, :] * A[:, k])
     for n in range(N - 2, -1, -1):
         for k in range(K):
-            betas[n, k] = np.sum(
-                betas[n + 1, :] * probabilities[n + 1, :]
-                *  # non sono sicura che ci vada il k in probabilities
-                A[k, :])
+            betas[n, k] = np.sum(betas[n + 1, :] * probabilities[n + 1, :] *
+                                 A[k, :])
     return alphas, betas
 
 
@@ -97,7 +95,141 @@ def compute_likelihood(gammas, pis, xi, A, probabilities):
     return aux
 
 
-class HMM_GraphicalLasso(GraphicalLasso, KMeans):
+def _initialization(X, K, init_params, alpha):
+    N, d = X.shape
+    means = np.zeros((K, d))
+    thetas = []
+
+    # Initialization
+    init_type = init_params.get('clustering', None)
+    if init_type is None or str(init_type).lower() == 'kmeans':
+        clusters = KMeans(n_clusters=K).fit(X).labels_
+        for i, l in enumerate(np.unique(clusters)):
+            means[i, :] = np.mean(X[np.where(clusters == l)[0], :], axis=0)
+            emp_cov = empirical_covariance(X - means[i, :],
+                                           assume_centered=True)
+            thetas.append(graphical_lasso(emp_cov, alpha=alpha)[0])
+            covariances = [np.linalg.pinv(t) for t in thetas]
+    elif str(init_type).lower() == 'gmm':
+        gmm = GaussianMixture(n_components=K).fit(X)
+        means = gmm.means_
+        covariances = []
+        for i in range(K):
+            covariances.append(gmm.covariances_[i])
+    else:
+        raise ValueError('Unexpected value for clusters initialisations. '
+                         'Options are kmeans and ggm, found' + str(init_type))
+
+    init_type = init_params.get('probabilities', None)
+    if init_type is None or str(init_type).lower() == 'uniform':
+        pis = np.ones((K, 1)) / K
+        A = np.ones((K, K)) / K
+    elif str(init_type).lower() == 'random_uniform':
+        pis = np.random.uniform(0, 1, K)
+        pis /= np.sum(pis)
+        A = np.random.uniform(0, 1, shape=(K, K))
+        A /= np.sum(A, axis=1)[:, np.newaxis]
+    elif str(init_type).lower() == 'random_dirichlet':
+        pis = np.random.dirichlet(np.ones(K), 1)
+        A = np.random.dirichlet(np.ones(K), K)
+    else:
+        raise ValueError('Unexpected value for probabilities initialisations. '
+                         'Options are uniform, random_uniform and '
+                         'random_dirichlet, found' + str(init_type))
+    return means, covariances, A, pis
+
+
+def hmm_graphical_lasso(X,
+                        A,
+                        pis,
+                        means,
+                        covariances,
+                        alpha=0.1,
+                        max_iter=100,
+                        mode='scaled',
+                        verbose=0,
+                        warm_restart=False,
+                        tol=1e-3):
+    K = pis.shape[0]
+    N, d = X.shape
+    probabilities = np.zeros((N, K))
+    for n in range(N):
+        for k in range(K):
+            probabilities[n, k] = multivariate_normal.pdf(X[n, :],
+                                                          mean=means[k, :],
+                                                          cov=covariances[k])
+    likelihood_ = -np.inf
+    thetas = []
+    for iter_ in range(max_iter):
+        # E-step
+        if mode == 'scaled':
+            alphas, betas, cs = scaled_forward_backward(
+                X, pis, probabilities, A)
+            gammas = alphas * betas
+            xi = np.zeros((N - 1, K, K))
+            for n in range(1, N):
+                for k in range(K):
+                    xi[n - 1,
+                       k, :] = (cs[n] * alphas[n - 1, k] *
+                                probabilities[n, k] * betas[n, k] * A[k, :])
+        else:
+            alphas, betas = forward_backward(X, pis, probabilities, A)
+            gammas = alphas * betas
+            p_x = np.sum(alphas[-1, :])
+            gammas = gammas / p_x
+            xi = np.zeros((N - 1, K, K))
+            for n in range(1, N):
+                for k in range(K):
+                    xi[n-1, k, :] = alphas[n-1, k]*probabilities[n, k] * \
+                                  betas[n, k]*A[k, :]
+
+        # M-step
+        pis = gammas[0, :] / np.sum(gammas[0, :])
+        lambdas = alpha / np.sum(gammas, axis=0)  # should be of length K
+        thetas_old = thetas
+        thetas = []
+        for k in range(K):
+            means[k, :] = np.sum(gammas[:, k][:, np.newaxis] * X,
+                                 axis=0) / np.sum(gammas[:, k])
+            # not sure it is like this
+            S_k = (gammas[:, k][:, np.newaxis] *
+                   (X - means[k, :])).T.dot(X - means[k, :]) / np.sum(
+                       gammas[:, k])
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                if warm_restart and iter_ > 0:
+                    thetas.append(
+                        graphical_lasso(S_k,
+                                        alpha=lambdas[k],
+                                        init=thetas_old[k])[0])
+                else:
+                    thetas.append(graphical_lasso(S_k, alpha=lambdas[k])[0])
+            for j in range(K):
+                A[j, k] = np.sum(xi[:, j, k]) / np.sum(xi[:, j, :])
+        covariances = [np.linalg.pinv(t) for t in thetas]
+        probabilities = np.zeros((N, K))
+        for n in range(N):
+            for k in range(K):
+                probabilities[n,
+                              k] = multivariate_normal.pdf(X[n, :],
+                                                           mean=means[k, :],
+                                                           cov=covariances[k])
+        likelihood_old = likelihood_
+        likelihood_ = compute_likelihood(gammas, pis, xi, A, probabilities)
+
+        if verbose:
+            print('Iter: %d, likelihood: %.5f, difference: %.5f' %
+                  (iter_, likelihood_, np.abs(likelihood_ - likelihood_old)))
+        if np.abs(likelihood_ - likelihood_old) < tol:
+            break
+
+    else:
+        warnings.warn('The optimisation did not converge.')
+
+    return thetas, means, A, pis, gammas, probabilities, likelihood_
+
+
+class HMM_GraphicalLasso(GraphicalLasso):
     """TODOOOO
 
     Parameters
@@ -120,7 +252,11 @@ class HMM_GraphicalLasso(GraphicalLasso, KMeans):
         If verbose is True, the objective function, rnorm and snorm are
         printed at each iteration.
 
-
+    init_params: dict, default dict()
+        For each initial parameter we can specify different initialisation
+        values.
+        dict=(clustering=[kmeans, gmm],
+              probabilities=[uniform, random_uniform, random_dirichlet])
 
     Attributes
     ----------
@@ -141,13 +277,18 @@ class HMM_GraphicalLasso(GraphicalLasso, KMeans):
                  tol=1e-4,
                  verbose=False,
                  mode='scaled',
-                 init='uniform'):
+                 warm_restart=False,
+                 init_params=dict(),
+                 repetitions=1,
+                 n_jobs=-1):
         GraphicalLasso.__init__(self, alpha=alpha, tol=tol, max_iter=max_iter)
-        KMeans.__init__(
-            self, n_clusters=n_clusters
-        )  # TODO add other type of initialisation rather then the default
-        self.verbose_ = verbose
         self.mode = mode
+        self.verbose = verbose
+        self.n_clusters = n_clusters
+        self.init_params = init_params
+        self.warm_restart = warm_restart
+        self.repetitions = repetitions
+        self.n_jobs = n_jobs
 
     def fit(self, X, y=None):
         """Fit the GraphicalLasso model to X.
@@ -162,99 +303,54 @@ class HMM_GraphicalLasso(GraphicalLasso, KMeans):
                         ensure_min_features=2,
                         ensure_min_samples=2,
                         estimator=self)
-        # Initialization
-        clusters = KMeans.fit(self, X).labels_
-        # initialisation
-        N, d = X.shape
-        K = self.n_clusters
-        means = np.zeros((K, d))
-        thetas = []
-        # TODO: it may be changed to sampling from a uniform distribution
-        pis = np.ones((K, 1)) / K
-        A = np.ones((K, K)) / K
+
         # A = np.random.uniform(0, 1, (K, K))
         # A = A / np.sum(A, axis=0)[:, np.newaxis]
-        for i, l in enumerate(np.unique(clusters)):
-            means[i, :] = np.mean(X[np.where(clusters == l)[0], :], axis=0)
-            emp_cov = empirical_covariance(X - means[i, :],
-                                           assume_centered=True)
-            thetas.append(graphical_lasso(emp_cov, alpha=self.alpha)[0])
+        N, d = X.shape
+        K = self.n_clusters
 
-        covariances = [np.linalg.pinv(t) for t in thetas]
-        probabilities = np.zeros((N, K))
-        for n in range(N):
-            for k in range(K):
-                probabilities[n,
-                              k] = multivariate_normal.pdf(X[n, :],
-                                                           mean=means[k, :],
-                                                           cov=covariances[k])
-        likelihood_ = -np.inf
+        def _to_parallelize(X, K, init_params, alpha, max_iter, mode, verbose,
+                            warm_restart, tol):
+            means, covariances, A, pis = _initialization(
+                X, K, init_params, alpha)
+            thetas, means, A, pis, gammas, probabilities, likelihood = hmm_graphical_lasso(
+                X,
+                A,
+                pis,
+                means,
+                covariances,
+                alpha=alpha,
+                max_iter=max_iter,
+                mode=mode,
+                verbose=verbose,
+                warm_restart=warm_restart,
+                tol=tol)
+            return thetas, means, A, pis, gammas, probabilities, likelihood
 
-        for iter_ in range(self.max_iter):
-            # E-step
-            if self.mode == 'scaled':
-                alphas, betas, cs = scaled_forward_backward(
-                    X, pis, probabilities, A)
-                gammas = alphas * betas
-                xi = np.zeros((N - 1, K, K))
-                for n in range(1, N):
-                    for k in range(K):
-                        xi[n-1, k, :] = cs[n]*alphas[n-1, k]*probabilities[n, k] * \
-                                      betas[n, k]*A[k, :]
-            else:
-                alphas, betas = forward_backward(X, pis, probabilities, A)
-                gammas = alphas * betas
-                p_x = np.sum(alphas[-1, :])
-                gammas = gammas / p_x  #np.sum(gammas, axis=1)[:, np.newaxis]
-                #print(gammas)
-                #print(gammas)
-                xi = np.zeros((N - 1, K, K))
-                for n in range(1, N):
-                    for k in range(K):
-                        xi[n-1, k, :] = alphas[n-1, k]*probabilities[n, k] * \
-                                      betas[n, k]*A[k, :]
-
-            # M-step
-            pis = gammas[0, :] / np.sum(gammas[0, :])
-            lambdas = self.alpha / np.sum(gammas,
-                                          axis=0)  # should be of length K
-            thetas = []
-            for k in range(K):
-                means[k, :] = np.sum(gammas[:, k][:, np.newaxis] * X,
-                                     axis=0) / np.sum(gammas[:, k])
-                # not sure it is like this
-                S_k = (gammas[:, k][:, np.newaxis]*(X - means[k, :])).T.dot(X - means[k, :]) \
-                    / np.sum(gammas[:, k])
-                with warnings.catch_warnings():
-                    warnings.simplefilter("ignore")
-                    thetas.append(graphical_lasso(S_k, alpha=lambdas[k])[0])
-                for j in range(K):
-                    A[j, k] = np.sum(xi[:, j, k]) / np.sum(xi[:, j, :])
-            covariances = [np.linalg.pinv(t) for t in thetas]
-            probabilities = np.zeros((N, K))
-            for n in range(N):
-                for k in range(K):
-                    probabilities[n, k] = multivariate_normal.pdf(
-                        X[n, :], mean=means[k, :], cov=covariances[k])
-            likelihood_old = likelihood_
-            likelihood_ = compute_likelihood(gammas, pis, xi, A, probabilities)
-
-            if self.verbose_:
-                print(
-                    'Iter: %d, likelihood: %.5f, difference: %.5f' %
-                    (iter_, likelihood_, np.abs(likelihood_ - likelihood_old)))
-            if np.abs(likelihood_ - likelihood_old) < self.tol:
-                break
-
+        if self.repetitions == 1:
+            out = [
+                _to_parallelize(X, K, self.init_params, self.alpha,
+                                self.max_iter, self.mode, self.verbose,
+                                self.warm_restart, self.tol)
+            ]
         else:
-            warnings.warn('The optimisation did not converge.')
+            parallel = Parallel(n_jobs=self.n_jobs, verbose=self.verbose)
+            with parallel:
+                out = parallel(
+                    delayed(_to_parallelize)
+                    (X, K, self.init_params, self.alpha, self.max_iter,
+                     self.mode, self.verbose, self.warm_restart, self.tol)
+                    for i in range(self.repetitions))
 
-        self.precisions_ = thetas
-        # self.states = NON CE li HO
-        self.means_ = means
-        self.state_change = A
-        self.pis_ = pis
-        self.labels_ = np.argmax(gammas, axis=1)
-        self.gammas_ = gammas
+        best_repetition = np.argmax([o[-1] for o in out])
+        self.all_results = out
+        self.likelihood_ = out[best_repetition][-1]
+        self.precisions_ = out[best_repetition][0]
+        self.means_ = out[best_repetition][1]
+        self.state_change = out[best_repetition][2]
+        self.pis_ = out[best_repetition][3]
+        self.gammas_ = out[best_repetition][4]
+        self.probabilities_ = out[best_repetition][5]
+        self.labels_ = np.argmax(self.gammas_, axis=1)
 
         return self
