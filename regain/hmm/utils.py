@@ -1,5 +1,7 @@
 import numpy as np
 from regain.utils import structure_error
+from scipy import integrate
+from scipy.stats import multivariate_normal
 from sklearn.base import clone
 from sklearn.metrics.cluster import (adjusted_mutual_info_score,
                                      contingency_matrix,
@@ -7,7 +9,7 @@ from sklearn.metrics.cluster import (adjusted_mutual_info_score,
 from tqdm import tqdm
 
 
-def viterbi(X, A, probabilities, pis):
+def viterbi_path(X, A, probabilities, pis):
 
     T = X.shape[0]
     M = A.shape[0]
@@ -47,6 +49,41 @@ def viterbi(X, A, probabilities, pis):
     S = np.flip(S, axis=0)
 
     return S
+
+
+def probability_next_point(means,
+                           covariances,
+                           alphas,
+                           A,
+                           mode,
+                           state,
+                           interval=None):
+    if not mode == 'scaled':
+        pX = np.sum(alphas[-1, :])
+    else:
+        pX = 1
+    D, K = means.shape
+
+    # interval to integrate
+    if interval is None:
+        interv = []
+        for d in range(D):
+            interv.append([
+                means[state][d] - covariances[state][d][d],
+                means[state][d] + covariances[state][d][d]
+            ])
+    prob = 0
+    for k in range(K):
+
+        def _to_integrate(x):
+            return 1 / pX * multivariate_normal.pdf(
+                x, mean=means[k], cov=covariances[k]) * np.sum(
+                    A[:, k] * alphas[-1, :])
+
+        res, err = integrate.nquad(_to_integrate, interv)
+        prob += res
+
+    return prob
 
 
 def cross_validation(estimator, X, params=None, mode=None, n_repetitions=10):

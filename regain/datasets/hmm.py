@@ -1,11 +1,60 @@
 import numpy as np
 from regain.datasets.gaussian import make_starting
 from scipy import linalg
+from scipy.stats import bernoulli
+from sklearn.datasets import make_spd_matrix
+
+# def ncr(n, r):
+#     r = min(r, n-r)
+#     numer = reduce(op.mul, range(n, n-r, -1), 1)
+#     denom = reduce(op.mul, range(1, r+1), 1)
+#     return numer / denom
+
+
+def generate_precision_matrix(n_dim_obs=100, previouses=[]):
+    if n_dim_obs <= 2:
+        raise ValueError('With only 2 observed variables it is not possible '
+                         'to create different complementary states.')
+
+    theta = np.identity(n_dim_obs)
+
+    not_available_positions = []
+
+    for p in previouses:
+        print(p)
+        for i, j in zip(np.where(p != 0)[0], np.where(p != 0)[1]):
+            not_available_positions.append((i, j))
+    not_available_positions = list(set(not_available_positions))
+    print(not_available_positions)
+    for i in range(n_dim_obs):
+        for j in range(i + 1, n_dim_obs):
+            if (i, j) not in not_available_positions:
+                theta[i, j] = bernoulli.rvs(0.5, size=1)
+                theta[j, i] = theta[i, j]
+    return theta
+
+
+def generate_complementary_precisions_matrix(n_dim_obs=100, n_states=5):
+
+    # possible combinations Probabilmente non necessario
+    # N_tot_comb = 0
+    # for i in range(1,dim+1):
+    #     N_tot_comb += ncr(dim, i)
+    # if N_states > N_tot_comb:
+    #     raise ValueError('The number of states is too big, reduce the value of N_states')
+
+    precisions = []
+    covariances = []
+    for i in range(n_states):
+        precisions.append(generate_precision_matrix(n_dim_obs, precisions))
+        covariances.append(linalg.pinv(precisions[-1]))
+    return covariances, precisions
 
 
 def generate_hmm(n_samples=100,
                  n_states=5,
                  n_dim_obs=10,
+                 mode_precisions='complementary',
                  transition_type='fixed',
                  smooth_transition=10,
                  min_transition_window=1,
@@ -19,14 +68,24 @@ def generate_hmm(n_samples=100,
     smooth_transition: int, optional default=10
     Window for smooth transition in case of fixed_smooth type of transition.
     Ignored in the other cases.
+    mode_precisions: string, optional default='complementary'
+    Possible values are complementary to generate complementary precision matrices,
+    regain to use the funcion make_starting of the library, sklearn to use the function make_spd_matrix
     """
     precisions, covariances, means = [], [], []
-    for k in range(n_states):
-        precisions.append(
-            make_starting(n_dim_obs=n_dim_obs, n_dim_lat=0, **kwargs)[0])
-        covariances.append(linalg.pinv(precisions[k]))
-        means.append(np.random.normal(0, sigma, n_dim_obs))
-
+    if mode_precisions == 'complementary':
+        covariances, precisions = generate_complementary_precisions_matrix(
+            n_dim_obs, n_states)
+    else:
+        for k in range(n_states):
+            if mode_precisions == 'regain':
+                precisions.append(
+                    make_starting(n_dim_obs=n_dim_obs, n_dim_lat=0,
+                                  **kwargs)[0])
+                covariances.append(linalg.pinv(precisions[k]))
+            else:
+                covariances.append(make_spd_matrix(n_dim_obs))
+    means = [np.random.normal(0, sigma, n_dim_obs) for k in range(n_states)]
     # Generate a transition matrix
     A = np.zeros((n_states, n_states))
     for i in range(n_states):
@@ -90,6 +149,7 @@ def generate_hmm(n_samples=100,
         variations_sum.append(p_vec_0[j] + np.cumsum(data[:, j]))
     variations_sum = np.array(variations_sum)
 
+    states = np.argmax(gammas, axis=1)
     res = dict(data=data,
                thetas=precisions,
                covariances=covariances,
