@@ -1,53 +1,61 @@
+import operator as op
+from functools import reduce
+
 import numpy as np
 from regain.datasets.gaussian import make_starting
 from scipy import linalg
 from scipy.stats import bernoulli
 from sklearn.datasets import make_spd_matrix
 
-# def ncr(n, r):
-#     r = min(r, n-r)
-#     numer = reduce(op.mul, range(n, n-r, -1), 1)
-#     denom = reduce(op.mul, range(1, r+1), 1)
-#     return numer / denom
+
+def isPSD(A, tol=1e-8):
+    E = np.linalg.eigvalsh(A)
+    return np.all(E > -tol)
 
 
-def generate_precision_matrix(n_dim_obs=100, previouses=[]):
-    if n_dim_obs <= 2:
+def ncr(n, r):
+    r = min(r, n - r)
+    numer = reduce(op.mul, range(n, n - r, -1), 1)
+    denom = reduce(op.mul, range(1, r + 1), 1)
+    return numer / denom
+
+
+def generate_precision_matrix(dim):
+    Theta = np.identity(dim)
+    for i in range(dim):
+        for j in range(i + 1, dim):
+            Theta[i, j] = bernoulli.rvs(0.5, size=1)
+            Theta[j, i] = Theta[i, j]
+    return Theta
+
+
+def generate_complementary_precisions_matrix(dim, N_states):
+
+    # Initial checks
+    if dim <= 2:
         raise ValueError('With only 2 observed variables it is not possible '
                          'to create different complementary states.')
+    # possible combinations
+    N_tot_comb = 0
+    for i in range(1, dim + 1):
+        N_tot_comb += ncr(dim, i)
+    if dim <= 2 or N_states > N_tot_comb:
+        raise ValueError(
+            'The number of states is too big, reduce the value of N_states')
 
-    theta = np.identity(n_dim_obs)
-
-    not_available_positions = []
-
-    for p in previouses:
-        print(p)
-        for i, j in zip(np.where(p != 0)[0], np.where(p != 0)[1]):
-            not_available_positions.append((i, j))
-    not_available_positions = list(set(not_available_positions))
-    print(not_available_positions)
-    for i in range(n_dim_obs):
-        for j in range(i + 1, n_dim_obs):
-            if (i, j) not in not_available_positions:
-                theta[i, j] = bernoulli.rvs(0.5, size=1)
-                theta[j, i] = theta[i, j]
-    return theta
-
-
-def generate_complementary_precisions_matrix(n_dim_obs=100, n_states=5):
-
-    # possible combinations Probabilmente non necessario
-    # N_tot_comb = 0
-    # for i in range(1,dim+1):
-    #     N_tot_comb += ncr(dim, i)
-    # if N_states > N_tot_comb:
-    #     raise ValueError('The number of states is too big, reduce the value of N_states')
-
-    precisions = []
-    covariances = []
-    for i in range(n_states):
-        precisions.append(generate_precision_matrix(n_dim_obs, precisions))
-        covariances.append(linalg.pinv(precisions[-1]))
+    Theta = generate_precision_matrix(dim)
+    precisions = [Theta]
+    covariances = [linalg.pinv(Theta)]
+    counts = 1
+    while counts < N_states:
+        Theta = generate_precision_matrix(dim)
+        N_equal = []
+        for j in range(len(precisions)):
+            N_equal.append((Theta == precisions[j]).all())
+        if np.sum(N_equal) == 0:
+            precisions.append(Theta)
+            covariances.append(linalg.pinv(Theta))
+            counts += 1
     return covariances, precisions
 
 
@@ -55,6 +63,7 @@ def generate_hmm(n_samples=100,
                  n_states=5,
                  n_dim_obs=10,
                  mode_precisions='complementary',
+                 mode_mean='Normal',
                  transition_type='fixed',
                  smooth_transition=10,
                  min_transition_window=1,
@@ -85,7 +94,20 @@ def generate_hmm(n_samples=100,
                 covariances.append(linalg.pinv(precisions[k]))
             else:
                 covariances.append(make_spd_matrix(n_dim_obs))
-    means = [np.random.normal(0, sigma, n_dim_obs) for k in range(n_states)]
+
+    if mode_mean == 'Normal':
+        means = [
+            np.random.normal(0, sigma, n_dim_obs) for k in range(n_states)
+        ]
+    elif mode_mean == 'Uniform':
+        min_max = np.random.uniform(-50, 50, 2)
+        means = [
+            np.random.uniform(min(min_max), max(min_max), n_dim_obs)
+            for k in range(n_states)
+        ]
+    else:
+        raise ValueError('Unknown mode_mean type')
+
     # Generate a transition matrix
     A = np.zeros((n_states, n_states))
     for i in range(n_states):

@@ -105,11 +105,20 @@ def _initialization(X, K, init_params, alpha):
     init_type = init_params.get('clustering', None)
     if init_type is None or str(init_type).lower() == 'kmeans':
         clusters = KMeans(n_clusters=K).fit(X).labels_
+
         for i, l in enumerate(np.unique(clusters)):
+            if alpha == 'auto':
+                a = alpha_heuristic(emp_cov,
+                                    np.size(X[np.where(clusters == l)[0], :],
+                                            axis=0),
+                                    gamma=0.01)
+            else:
+                a = alpha
             means[i, :] = np.mean(X[np.where(clusters == l)[0], :], axis=0)
             emp_cov = empirical_covariance(X - means[i, :],
                                            assume_centered=True)
-            thetas.append(graphical_lasso(emp_cov, alpha=alpha)[0])
+
+            thetas.append(graphical_lasso(emp_cov, alpha=a)[0])
             covariances = [np.linalg.pinv(t) for t in thetas]
     elif str(init_type).lower() == 'gmm':
         gmm = GaussianMixture(n_components=K).fit(X)
@@ -196,6 +205,11 @@ def hmm_graphical_lasso(X,
             S_k = (gammas[:, k][:, np.newaxis] *
                    (X - means[k, :])).T.dot(X - means[k, :]) / np.sum(
                        gammas[:, k])
+            if alpha == 'auto':
+                lambdas[k] = alpha_heuristic(S_k,
+                                             math.floor(np.sum(gammas[:, k])),
+                                             gamma=0.01)
+
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore")
                 if warm_restart and iter_ > 0:
@@ -238,6 +252,7 @@ class HMM_GraphicalLasso(GraphicalLasso):
     alpha : positive float, default 0.01
         The regularization parameter: the higher alpha, the more
         regularization, the sparser the inverse covariance.
+        Alpha could also be 'auto' in which case it is computed as heuristic.
 
     n_clusters: integer, default 3
         The number of clusters to form as well as the number of centroids to

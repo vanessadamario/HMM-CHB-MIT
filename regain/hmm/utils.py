@@ -1,12 +1,27 @@
 import numpy as np
 from regain.utils import structure_error
-from scipy import integrate
+from scipy import integrate, stats
 from scipy.stats import multivariate_normal
 from sklearn.base import clone
 from sklearn.metrics.cluster import (adjusted_mutual_info_score,
                                      contingency_matrix,
                                      homogeneity_completeness_v_measure)
 from tqdm import tqdm
+
+
+def alpha_heuristic(emp_cov, n_samples, gamma=0.1):
+    if n_samples < 3:
+        return 0
+    else:
+        d = np.size(emp_cov, axis=0)
+        emp_var = np.diagonal(emp_cov)
+        m = np.max([
+            emp_var[i] * emp_var[j] for i in range(d) for j in range(i + 1, d)
+        ])
+        t = stats.t.pdf(gamma / (2 * d**2), n_samples - 2)
+        num = t * m
+        den = np.sqrt(n_samples - 2 + t**2)
+        return num / den
 
 
 def viterbi_path(X, A, probabilities, pis):
@@ -92,7 +107,9 @@ def cross_validation(estimator, X, params=None, mode=None, n_repetitions=10):
     The parameters to try, keys of the dictionaries are 'alpha' and 'n_clusters'.
     If no interval is provided default values will be cross-validate. In
     particular: alpha = np.logspace(-3,3, 10) and n_clusters=np.arange(2, 12)
-
+    Alpha could also be passed as 'auto' in which case it is automatically
+    computed with an heuristic.
+    
     mode: string, optional default=None
     Options are:
     - 'bic' for model selection based on Bayesian Information Criterion.
@@ -116,7 +133,7 @@ def cross_validation(estimator, X, params=None, mode=None, n_repetitions=10):
         alphas = params.get('alpha', np.logspace(-3, 3, 10))
         n_clusters = params.get('n_clusters', np.arange(2, 12))
 
-    N = X.shape[0]
+    N, D = X.shape
     results = {}
     for a in tqdm(alphas):
         for c in tqdm(n_clusters):
@@ -128,9 +145,10 @@ def cross_validation(estimator, X, params=None, mode=None, n_repetitions=10):
             connectivity_matrix = np.zeros((N, N))
             for i in range(n_repetitions):
                 est.fit(X)
+                dof = np.sum([np.count_nonzero(p) for p in est.precisions_])
                 bics.append(
-                    np.log(N) * np.log(c) * np.exp(-a) -
-                    2 * est.likelihood_)  # not sure
+                    np.log(N) * ((c + 1) * (c - 1) + D * c + dof) -
+                    2 * est.likelihood_)
                 C = np.zeros_like(connectivity_matrix)
                 for r, i in enumerate(est.labels_):
                     C[r, i] = 1
