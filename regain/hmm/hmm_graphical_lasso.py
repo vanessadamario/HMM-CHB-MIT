@@ -242,7 +242,11 @@ def hmm_graphical_lasso(X,
     else:
         warnings.warn('The optimisation did not converge.')
 
-    return thetas, means, A, pis, gammas, probabilities, alphas, likelihood_
+    out = [
+        thetas, means, A, pis, gammas, probabilities, alphas, covariances,
+        likelihood_
+    ]
+    return out
 
 
 class HMM_GraphicalLasso(GraphicalLasso):
@@ -330,19 +334,18 @@ class HMM_GraphicalLasso(GraphicalLasso):
                             warm_restart, tol):
             means, covariances, A, pis = _initialization(
                 X, K, init_params, alpha)
-            thetas, means, A, pis, gammas, probabilities, alphas, likelihood = hmm_graphical_lasso(
-                X,
-                A,
-                pis,
-                means,
-                covariances,
-                alpha=alpha,
-                max_iter=max_iter,
-                mode=mode,
-                verbose=verbose,
-                warm_restart=warm_restart,
-                tol=tol)
-            return thetas, means, A, pis, gammas, probabilities, alphas, likelihood
+            out = hmm_graphical_lasso(X,
+                                      A,
+                                      pis,
+                                      means,
+                                      covariances,
+                                      alpha=alpha,
+                                      max_iter=max_iter,
+                                      mode=mode,
+                                      verbose=verbose,
+                                      warm_restart=warm_restart,
+                                      tol=tol)
+            return out
 
         if self.repetitions == 1:
             out = [
@@ -369,173 +372,94 @@ class HMM_GraphicalLasso(GraphicalLasso):
         self.gammas_ = out[best_repetition][4]
         self.probabilities_ = out[best_repetition][5]
         self.alphas_ = out[best_repetition][6]
+        self.covariances_ = out[best_repetition][7]
         self.labels_ = np.argmax(self.gammas_, axis=1)
 
         return self
 
     def predict(self, X, method='viterbi'):
-        #
-        #         if method == 'viterbi':
-        #             results = viterbi_path(X, self.state_change, self.prob, self.pis_)
-        #             state = np.random.choice(np.arange(self.n_clusters),
-        #                                      replace=True,
-        #                                      p=self.state_change[int(results[-1]), :])
-        #             sample = np.random.multivariate_normal(self.means_[state],
-        #                                                    self.cov[state], 1)
-        #             prob = probability_next_point(self.means_, self.cov, self.alphas_,
-        #                                           self.state_change, self.mode, state)
-        #             prediction = dict(pred=sample,
-        #                               means=self.means_[state],
-        #                               stds=np.sqrt(self.cov[state].diagonal()),
-        #                               prob_sample=prob)
-        #         elif method == 'hassan':
-        #             pXn = np.sum(self.prob * self.gammas_, axis=1)
-        #             delpX_n = np.abs(pXn - pXn[-1])
-        #             n_sim = np.argmin(delpX_n[:-1])
-        #             state = np.argmax(self.gammas_[n_sim, :])
-        #             prob = probability_next_point(self.means_, self.cov, self.alphas,
-        #                                           self.state_change, self.mode)
-        #             prediction = dict(pred=pred,
-        #                               means=self.means_[state],
-        #                               stds=np.sqrt(self.cov[state].diagonal()),
-        #                               prob_sample=prob)
-        #         elif method == 'integral':
-        #             # prob = probability_next_point(
-        #             #     self.means_,
-        #             #     self.cov,
-        #             #     self.alphas,
-        #             #     self.state_change,
-        #             #     self.mode,
-        #             #     interval=[[-np.inf, np.inf] # possibly must be reduced
-        #             #               for d in range(self.means_.shape[1])])
-        #             # TO MAKE IN FUNCTIOn
-        #             D = self.means_.shape[1]
-        #             K = self.means_.shape[0]
-        #             if not self.mode == 'scaled':
-        #                 pX = np.sum(self.alphas[-1, :])
-        #             else:
-        #                 pX = 1
-        #             intervals = []
-        #             for d in range(D):
-        #                 intervals.append(
-        #                     [-np.inf, np.inf]
-        #                 )  # TODO: reduce space by takinh interval of change in original time-series
-        #             Expect_vec = []
-        #             for d in range(D):
-        #                 Expect = 0
-        #                 for k in range(K):
-        #
-        #                     def _to_integrate(x):
-        #                         return 1 / pX *x[d]* multivariate_normal.pdf(x, mean=self.means_[k], cov=self.cov[k]) \
-        #                                            * np.sum(self.state_change[:, k] * self.alphas[-1, :])
-        #
-        #                     res, err = integrate.nquad(_to_integrate, interv)
-        #
-        #                     Expect += res
-        #                 Expect_vec.append(Expect)
-        #
-        #             Variance_vec = []
-        #             intervals_conf = []
-        #             for d in range(D):
-        #                 Var = 0
-        #                 for k in range(K):
-        #                     func2 = lambda *x: 1 / pX * (x[d] - Expect_vec[
-        #                         d])**2 * multivariate_normal.pdf(
-        #                             x, mean=self.means_[k], cov=self.cov[k]) * np.sum(
-        #                                 self.state_change[:, k] * self.alphas[-1, :])
-        #                     res, err = integrate.nquad(func2, intervals)
-        #                     Var += res
-        #                 Variance_vec.append(Var)
-        #                 intervals_conf.append(
-        #                     [Expect_vec[d] - Var, Expect_vec[d] + Var])
-        #
-        #             prob = 0
-        #             for k in range(K):
-        #                 func3 = lambda *x: 1 / pX * multivariate_normal.pdf(
-        #                     x, mean=self.means_[k], cov=self.cov[k]) * np.sum(
-        #                         self.state_change[:, k] * self.alphas[-1, :])
-        #                 res, err = integrate.nquad(func3, intervals_conf)
-        #                 prob += res
-        #
-        #             sample = np.random.multivariate_normal(Expect_vec,
-        #                                                    np.sqrt(Variance_vec), 1)
-        #
-        #             prediction = dict(pred=sample,
-        #                               means=Expect_vec,
-        #                               stds=np.sqrt(Variance_vec),
-        #                               prob_sample=prob)
-        # delta = X[n_sim + 1, :] - X[n_sim, :]
-        #             pred = X[-1, :] + delta
-        #             prob = probability_next_point(self.means_, self.cov, self.alphas,
-        #                                           self.state_change, self.mode)
-        #             prediction = dict(pred=pred,
-        #                               means=self.means_[state],
-        #                               stds=np.sqrt(self.cov[state].diagonal()),
-        #                               prob_sample=prob)
-        #         elif method == 'integral':
-        #             # prob = probability_next_point(
-        #             #     self.means_,
-        #             #     self.cov,
-        #             #     self.alphas,
-        #             #     self.state_change,
-        #             #     self.mode,
-        #             #     interval=[[-np.inf, np.inf] # possibly must be reduced
-        #             #               for d in range(self.means_.shape[1])])
-        #             # TO MAKE IN FUNCTIOn
-        #             D = self.means_.shape[1]
-        #             K = self.means_.shape[0]
-        #             if not self.mode == 'scaled':
-        #                 pX = np.sum(self.alphas[-1, :])
-        #             else:
-        #                 pX = 1
-        #             intervals = []
-        #             for d in range(D):
-        #                 intervals.append(
-        #                     [-np.inf, np.inf]
-        #                 )  # TODO: reduce space by takinh interval of change in original time-series
-        #             Expect_vec = []
-        #             for d in range(D):
-        #                 Expect = 0
-        #                 for k in range(K):
-        #
-        #                     def _to_integrate(x):
-        #                         return 1 / pX *x[d]* multivariate_normal.pdf(x, mean=self.means_[k], cov=self.cov[k]) \
-        #                                            * np.sum(self.state_change[:, k] * self.alphas[-1, :])
-        #
-        #                     res, err = integrate.nquad(_to_integrate, interv)
-        #
-        #                     Expect += res
-        #                 Expect_vec.append(Expect)
-        #
-        #             Variance_vec = []
-        #             intervals_conf = []
-        #             for d in range(D):
-        #                 Var = 0
-        #                 for k in range(K):
-        #                     func2 = lambda *x: 1 / pX * (x[d] - Expect_vec[
-        #                         d])**2 * multivariate_normal.pdf(
-        #                             x, mean=self.means_[k], cov=self.cov[k]) * np.sum(
-        #                                 self.state_change[:, k] * self.alphas[-1, :])
-        #                     res, err = integrate.nquad(func2, intervals)
-        #                     Var += res
-        #                 Variance_vec.append(Var)
-        #                 intervals_conf.append(
-        #                     [Expect_vec[d] - Var, Expect_vec[d] + Var])
-        #
-        #             prob = 0
-        #             for k in range(K):
-        #                 func3 = lambda *x: 1 / pX * multivariate_normal.pdf(
-        #                     x, mean=self.means_[k], cov=self.cov[k]) * np.sum(
-        #                         self.state_change[:, k] * self.alphas[-1, :])
-        #                 res, err = integrate.nquad(func3, intervals_conf)
-        #                 prob += res
-        #
-        #             sample = np.random.multivariate_normal(Expect_vec,
-        #                                                    np.sqrt(Variance_vec), 1)
-        #
-        #             prediction = dict(pred=sample,
-        #                               means=Expect_vec,
-        #                               stds=np.sqrt(Variance_vec),
-        #                               prob_sample=prob)
+
+        if method == 'viterbi':
+            results = viterbi_path(X, self.state_change, self.prob, self.pis_)
+            state = np.random.choice(np.arange(self.n_clusters),
+                                     replace=True,
+                                     p=self.state_change[int(results[-1]), :])
+            sample = np.random.multivariate_normal(self.means_[state],
+                                                   self.covariances_[state], 1)
+            prob = probability_next_point(self.means_, self.covariances_,
+                                          self.alphas_, self.state_change,
+                                          self.mode, state)
+            prediction = dict(pred=sample,
+                              means=self.means_[state],
+                              stds=np.sqrt(
+                                  self.covariances_[state].diagonal()),
+                              prob_sample=prob)
+        elif method == 'hassan':
+            pXn = np.sum(self.probabilities_ * self.gammas_, axis=1)
+            delpX_n = np.abs(pXn - pXn[-1])
+            n_sim = np.argmin(delpX_n[:-1])
+            state = np.argmax(self.gammas_[n_sim, :])
+            delta = X[n_sim + 1, :] - X[n_sim, :]
+            sample = X[-1, :] + delta
+            prob = probability_next_point(self.means_, self.covariances_,
+                                          self.alphas_, self.state_change,
+                                          self.mode, state)
+            prediction = dict(pred=sample,
+                              means=self.means_[state],
+                              stds=np.sqrt(self.cov[state].diagonal()),
+                              prob_sample=prob)
+        elif method == 'integral':
+            D, K = self.means_.shape
+            expectations = []
+            for d in range(D):
+                prob = probability_next_point(
+                    self.means_,
+                    self.covariances_,
+                    self.alphas_,
+                    self.state_change,
+                    self.mode,
+                    x=d,
+                    interval=[
+                        [-np.inf, np.inf]  # possibly must be reduced
+                        for d in range(self.means_.shape[1])
+                    ])
+                expectations.append(prob)
+
+            variances = []
+            intervals_conf = []
+            for d in range(D):
+                prob = probability_next_point(
+                    self.means_,
+                    self.covariances,
+                    self.alphas_,
+                    self.state_change,
+                    self.mode,
+                    x=d,
+                    interval=[
+                        [-np.inf, np.inf]  # possibly must be reduced
+                        for d in range(self.means_.shape[1])
+                    ],
+                    expectations=expectations)
+                variances.append(prob)
+
+            intervals_conf = [[
+                expectations[i] - variances[i], expectations[i] + variances[i]
+            ] for i in range(D)]
+
+            prob = probability_next_point(self.means_,
+                                          self.covariances_,
+                                          self.alphas_,
+                                          self.state_change,
+                                          self.mode,
+                                          x=d,
+                                          interval=intervals_conf)
+
+            sample = np.random.multivariate_normal(expectations,
+                                                   np.sqrt(variances), 1)
+
+            prediction = dict(pred=sample,
+                              means=expectations,
+                              stds=np.sqrt(variances),
+                              prob_sample=prob)
 
         return prediction

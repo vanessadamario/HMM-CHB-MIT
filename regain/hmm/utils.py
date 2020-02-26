@@ -71,8 +71,10 @@ def probability_next_point(means,
                            alphas,
                            A,
                            mode,
-                           state,
-                           interval=None):
+                           state=non_zeros,
+                           i=None,
+                           interval=None,
+                           expectations=None):
     if not mode == 'scaled':
         pX = np.sum(alphas[-1, :])
     else:
@@ -87,13 +89,24 @@ def probability_next_point(means,
                 means[state][d] - covariances[state][d][d],
                 means[state][d] + covariances[state][d][d]
             ])
+
     prob = 0
     for k in range(K):
 
         def _to_integrate(x):
-            return 1 / pX * multivariate_normal.pdf(
-                x, mean=means[k], cov=covariances[k]) * np.sum(
-                    A[:, k] * alphas[-1, :])
+            if i is None and expectations is None:
+                return 1 / pX * multivariate_normal.pdf(
+                    x, mean=means[k], cov=covariances[k]) * np.sum(
+                        A[:, k] * alphas[-1, :])
+            elif expectations is None:
+                return 1 / pX * x[i] * multivariate_normal.pdf(
+                    x, mean=means[k], cov=covariances[k]) * np.sum(
+                        A[:, k] * alphas[-1, :])
+            else:
+                return 1 / pX * (x[i] - expectations[i])**2 * \
+                    multivariate_normal.pdf(
+                        x, mean=means[k], cov=covariances[k]) * np.sum(
+                            A[:, k] * alphas[-1, :])
 
         res, err = integrate.nquad(_to_integrate, interv)
         prob += res
