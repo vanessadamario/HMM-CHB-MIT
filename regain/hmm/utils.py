@@ -109,7 +109,7 @@ def cross_validation(estimator, X, params=None, mode=None, n_repetitions=10):
     particular: alpha = np.logspace(-3,3, 10) and n_clusters=np.arange(2, 12)
     Alpha could also be passed as 'auto' in which case it is automatically
     computed with an heuristic.
-    
+
     mode: string, optional default=None
     Options are:
     - 'bic' for model selection based on Bayesian Information Criterion.
@@ -195,7 +195,7 @@ def results_recap(labels_true, labels_pred, thetas_true, thetas_pred,
                                              average_method='arithmetic')
 
     c = contingency_matrix(labels_true, labels_pred)
-    c = c / np.sum(c, axis=0)[:, np.newaxis]
+    c = c / np.sum(c, axis=0)[np.newaxis, :]
     mcc = np.zeros((len(thetas_true), len(thetas_pred)))
     f1_score = np.zeros((len(thetas_true), len(thetas_pred)))
     for i, t_t in enumerate(thetas_true):
