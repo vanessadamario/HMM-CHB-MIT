@@ -24,45 +24,42 @@ def alpha_heuristic(emp_cov, n_samples, gamma=0.1):
         return num / den
 
 
-def viterbi_path(X, A, probabilities, pis):
+def viterbi_path(pis, probs, A, mode):
 
-    T = X.shape[0]
-    M = A.shape[0]
+    N, K = probs.shape
 
-    omega = np.zeros((T, M))
-    omega[0, :] = np.log(pis) + np.log(probabilities[0, :])
+    if np.any(pis == 0):
+        pis = pis + 1e-10
+    if np.any(A == 0):
+        A = A + 1e-10
+    if np.any(probs == 0):
+        probs = probs + np.min(probs[probs != 0])
 
-    prev = np.zeros((T - 1, M))
+    deltas = np.zeros((N, K))
+    psis = np.zeros((N, K))
+    S = np.zeros(N)
 
-    for t in range(1, T):
-        for j in range(M):
-            # Same as Forward Probability
-            probability = omega[t - 1, :] + np.log(A[:, j]) + np.log(
-                probabilities[t, j])
+    if mode == 'scaled':
+        deltas[0, :] = np.log(pis[0, :] * probs[0, :])
+    else:
+        deltas[0, :] = pis[0, :] * probs[0, :]
 
-            # This is our most probable state given previous state at time t
-            prev[t - 1, j] = np.argmax(probability)
+    psis[0, :] = 0
 
-            # This is the probability of the most probable state
-            omega[t, j] = np.max(probability)
+    for n in range(1, N):
+        for j in range(K):
+            if mode == 'scaled':
+                deltas[n, j] = np.max(deltas[n - 1, :] +
+                                      np.log(A[:, j])) + np.log(probs[n, j])
+                psis[n, j] = np.argmax(deltas[n - 1, :] + np.log(A[:, j]))
+            else:
+                deltas[n, j] = np.max(deltas[n - 1, :] * A[:, j]) * probs[n, j]
+                psis[n, j] = np.argmax(deltas[n - 1, :] * A[:, j])
+    Pstar = np.max(deltas[N, :])
+    S[N] = np.argmax(deltas[N, :])
 
-    # Path Array
-    S = np.zeros(T)
-
-    # Find the most probable last hidden state
-    last_state = np.argmax(omega[T - 1, :])
-
-    S[0] = last_state
-
-    backtrack_index = 1
-    for i in range(T - 2, -1, -1):
-        S[backtrack_index] = prev[i, int(last_state)]
-        last_state = prev[i, int(last_state)]
-        backtrack_index += 1
-
-    # Flip the path array since we were backtracking
-    S = np.flip(S, axis=0)
-
+    for n in range(N - 1, -1, -1):
+        S[n] = np.max(psis[n + 1, :])
     return S
 
 
@@ -71,7 +68,7 @@ def probability_next_point(means,
                            alphas,
                            A,
                            mode,
-                           state=non_zeros,
+                           state=None,
                            i=None,
                            interval=None,
                            expectations=None):
@@ -199,54 +196,53 @@ def cross_validation(estimator, X, params=None, mode=None, n_repetitions=10):
     return best_params, results
 
 
-def results_recap(labels_true, labels_pred, thetas_true, thetas_pred,
-                  gammas_true, gammas_pred):
+def results_recap(labels_true,
+                  labels_pred,
+                  thetas_true=None,
+                  thetas_pred=None,
+                  gammas_true=None,
+                  gammas_pred=None):
     homogeneity, completeness, v_measure = homogeneity_completeness_v_measure(
         labels_true, labels_pred)
     mutual_info = adjusted_mutual_info_score(labels_true,
                                              labels_pred,
                                              average_method='arithmetic')
 
-    c = contingency_matrix(labels_true, labels_pred)
-    c = c / np.sum(c, axis=0)[np.newaxis, :]
-    mcc = np.zeros((len(thetas_true), len(thetas_pred)))
-    f1_score = np.zeros((len(thetas_true), len(thetas_pred)))
-    for i, t_t in enumerate(thetas_true):
-        for j, t_p in enumerate(thetas_pred):
-            ss = structure_error(t_t, t_p, no_diagonal=True)
-            mcc[i, j] = ss['mcc']
-            f1_score[i, j] = ss['f1']
-
-    couples = []
-    aux = c.copy()
-    res = []
-    for i in range(len(thetas_pred)):
-        couple = np.unravel_index(aux.argmax(), aux.shape)
-        aux[:, couple[1]] = -np.inf
-        couples.append(couple)
-        res.append('Couple: ' + str(couple) + ', Probability: ' +
-                   str(c[couple]) + ', MCC: ' + str(mcc[couple]) +
-                   ', F1_score: ' + str(f1_score[couple]))
     results = {
-        'homogeneity [0, 1]':
-        homogeneity,
-        'completeness [0, 1]':
-        completeness,
-        'v_measure [0, 1]':
-        v_measure,
-        'adjusted_mutual_info [0, 1]':
-        mutual_info,
-        'weighted_mean_mcc [-1, 1]':
-        np.sum(mcc * c) / np.sum(c),
-        'max_cluster_mean_mcc[-1,1]':
-        np.sum([mcc[c] for c in couples]) / len(thetas_pred),
-        'weighted_mean_f1 [0, 1]':
-        np.sum(f1_score * c) / np.sum(c),
-        'max_cluster_mean_f1[0,1]':
-        np.sum([f1_score[c] for c in couples]) / len(thetas_pred),
-        'probabilities_clusters':
-        c,
-        'max_probabilities_couples':
-        res
+        'homogeneity [0, 1]': homogeneity,
+        'completeness [0, 1]': completeness,
+        'v_measure [0, 1]': v_measure,
+        'adjusted_mutual_info [0, 1]': mutual_info
     }
+
+    if thetas_true is not None:
+        c = contingency_matrix(labels_true, labels_pred)
+        c = c / np.sum(c, axis=0)[np.newaxis, :]
+        mcc = np.zeros((len(thetas_true), len(thetas_pred)))
+        f1_score = np.zeros((len(thetas_true), len(thetas_pred)))
+        for i, t_t in enumerate(thetas_true):
+            for j, t_p in enumerate(thetas_pred):
+                ss = structure_error(t_t, t_p, no_diagonal=True)
+                mcc[i, j] = ss['mcc']
+                f1_score[i, j] = ss['f1']
+
+        couples = []
+        aux = c.copy()
+        res = []
+        for i in range(len(thetas_pred)):
+            couple = np.unravel_index(aux.argmax(), aux.shape)
+            aux[:, couple[1]] = -np.inf
+            couples.append(couple)
+            res.append('Couple: ' + str(couple) + ', Probability: ' +
+                       str(c[couple]) + ', MCC: ' + str(mcc[couple]) +
+                       ', F1_score: ' + str(f1_score[couple]))
+
+        results['weighted_mean_mcc [-1, 1]'] = np.sum(mcc * c) / np.sum(c),
+        results['max_cluster_mean_mcc[-1,1]'] = np.sum(
+            [mcc[c] for c in couples]) / len(thetas_pred),
+        results['weighted_mean_f1 [0, 1]'] = np.sum(f1_score * c) / np.sum(c),
+        results['max_cluster_mean_f1[0,1]'] = np.sum(
+            [f1_score[c] for c in couples]) / len(thetas_pred),
+        results['probabilities_clusters'] = c,
+        results['max_probabilities_couples'] = res
     return results
