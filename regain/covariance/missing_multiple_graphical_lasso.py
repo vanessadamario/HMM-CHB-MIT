@@ -184,26 +184,26 @@ def objective(K, S, n_samples, alpha, beta, psi):
     return obj
 
 
-def latent_missing_multiple_graphical_lasso(emp_cov,
-                                            h=2,
-                                            alpha=0.01,
-                                            M=None,
-                                            mu=0,
-                                            eta=0,
-                                            beta=1.,
-                                            kernel=None,
-                                            psi="laplacian",
-                                            strong_M=False,
-                                            n_samples=None,
-                                            assume_centered=False,
-                                            tol=1e-3,
-                                            rtol=1e-3,
-                                            max_iter=200,
-                                            verbose=0,
-                                            rho=1.,
-                                            compute_objective=False,
-                                            return_history=False,
-                                            return_n_iter=False):
+def latent_multiple_graphical_lasso(emp_cov,
+                                    h=2,
+                                    alpha=0.01,
+                                    M=None,
+                                    mu=0,
+                                    eta=0,
+                                    beta=1.,
+                                    kernel=None,
+                                    psi="laplacian",
+                                    strong_M=False,
+                                    n_samples=None,
+                                    assume_centered=False,
+                                    tol=1e-3,
+                                    rtol=1e-3,
+                                    max_iter=200,
+                                    verbose=0,
+                                    rho=1.,
+                                    compute_objective=False,
+                                    return_history=False,
+                                    return_n_iter=False):
 
     psi_func, _, _ = check_norm_prox(psi)
     if M is None:
@@ -469,7 +469,7 @@ class LatentMultipleGraphicalLasso(LatentMissingGraphicalLasso,
             for cl in self.classes_
         ])
 
-        self.precision_, _, self.n_iter_ = latent_missing_time_graphical_lasso(
+        self.precision_, _, self.n_iter_ = latent_multiple_graphical_lasso(
             emp_cov,
             h=self.h,
             alpha=self.alpha,
