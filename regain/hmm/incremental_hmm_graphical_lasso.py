@@ -50,64 +50,6 @@ def NormAlphaUpdate(K, alp, A, prob):
     return s2
 
 
-def scaled_forward_backward(X, pis, probabilities, A):
-    N, _ = X.shape
-    K = pis.shape[0]
-    alphas = np.zeros((N, K))
-    betas = np.zeros((N, K))
-
-    # Initial forward probabilities
-    alphas[0, :] = pis.ravel() * probabilities[0, :] / np.sum(
-        pis.ravel() * probabilities[0, :])
-    # recursive forward algorithm
-    for n in range(N - 1):
-        normalization = alphas[n, :].dot(A).dot(probabilities[n + 1, :].T)
-        for k in range(K):
-            alphas[n + 1, k] = np.sum(
-                alphas[n, :] * A[:, k]) * probabilities[n + 1,
-                                                        k] / normalization
-
-    # Initial backward probabilities
-    betas[-1, :] = 1
-
-    # recursive backward algorithm
-    for n in range(N - 2, -1, -1):
-        Normn = alphas[n, :].dot(A).dot(probabilities[n + 1, :].T)
-        for k in range(K):
-            betas[n, k] = np.sum(
-                A[k, :] * probabilities[n + 1, :] * betas[n + 1, :]) / Normn
-    return alphas, betas
-
-
-def forward_backward(X, pis, probabilities, A):
-    N, _ = X.shape
-    K = pis.shape[0]
-    alphas = np.zeros((N, K))
-    betas = np.zeros((N, K))
-
-    # Initial forward probabilities
-    alphas[0, :] = pis.ravel() * probabilities[0, :]
-    # recursive forward algorithm
-    for n in range(N - 1):
-        for k in range(K):
-            alphas[n + 1, k] = probabilities[n + 1, k] * np.sum(
-                alphas[n, :] * A[:, k])
-
-    # Normalization term
-    P_X = np.sum(alphas[-1, :])
-
-    # Initial backward probabilities
-    betas[-1, :] = 1
-
-    # recursive backward algorithm
-    for n in range(N - 2, -1, -1):
-        for k in range(K):
-            betas[n, k] = np.sum(A[k, :] * probabilities[n + 1, :] *
-                                 betas[n + 1, :])
-
-    return alphas, betas, P_X
-
-
 def _incremental_hmm_graphical_lasso(X, n_for_init, thetas, mode, means,
                                      covariances, emp_cov, A, gammas,
                                      probabilities, alphas, betas, xi, alpha,
