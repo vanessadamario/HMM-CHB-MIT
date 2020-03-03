@@ -105,6 +105,7 @@ def probability_next_point(means,
                         x, mean=means[k], cov=covariances[k]) * np.sum(
                             A[:, k] * alphas[-1, :])
 
+        print(interv)
         res, err = integrate.nquad(_to_integrate, interv)
         prob += res
 
@@ -246,3 +247,15 @@ def results_recap(labels_true,
         results['probabilities_clusters'] = c,
         results['max_probabilities_couples'] = res
     return results
+
+def prepare_data_to_predict(X,p):
+    N,d = X.shape
+    if N<=p:
+        raise ValueError('Not enough observation for '+str(p)+'memory')
+    dataX = np.zeros((np.size(X,axis=0)-p,p*d))
+    dataY = np.zeros((np.size(X, axis=0) - p, d))
+    for i in range(p,np.size(X,axis=0)):
+        temp = X[i-p:i,:]
+        dataX[i-p,:] = X[i-p:i,:].reshape((1,np.size(temp)))
+        dataY[i-p,:] = X[i,:]
+    return dataX, dataY
