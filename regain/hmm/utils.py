@@ -40,9 +40,9 @@ def viterbi_path(pis, probs, A, mode):
     S = np.zeros(N)
 
     if mode == 'scaled':
-        deltas[0, :] = np.log(pis[0, :] * probs[0, :])
+        deltas[0, :] = np.log(pis * probs[0, :])
     else:
-        deltas[0, :] = pis[0, :] * probs[0, :]
+        deltas[0, :] = pis * probs[0, :]
 
     psis[0, :] = 0
 
@@ -55,10 +55,10 @@ def viterbi_path(pis, probs, A, mode):
             else:
                 deltas[n, j] = np.max(deltas[n - 1, :] * A[:, j]) * probs[n, j]
                 psis[n, j] = np.argmax(deltas[n - 1, :] * A[:, j])
-    Pstar = np.max(deltas[N, :])
-    S[N] = np.argmax(deltas[N, :])
+    Pstar = np.max(deltas[N - 1, :])
+    S[N - 1] = np.argmax(deltas[N - 1, :])
 
-    for n in range(N - 1, -1, -1):
+    for n in range(N - 2, -1, -1):
         S[n] = np.max(psis[n + 1, :])
     return S
 
@@ -76,37 +76,41 @@ def probability_next_point(means,
         pX = np.sum(alphas[-1, :])
     else:
         pX = 1
-    D, K = means.shape
+    K, D = means.shape
 
     # interval to integrate
     if interval is None:
-        interv = []
+        interval = []
         for d in range(D):
-            interv.append([
+            interval.append([
                 means[state][d] - covariances[state][d][d],
                 means[state][d] + covariances[state][d][d]
             ])
-
     prob = 0
     for k in range(K):
 
-        def _to_integrate(x):
-            if i is None and expectations is None:
-                return 1 / pX * multivariate_normal.pdf(
-                    x, mean=means[k], cov=covariances[k]) * np.sum(
-                        A[:, k] * alphas[-1, :])
-            elif expectations is None:
-                return 1 / pX * x[i] * multivariate_normal.pdf(
-                    x, mean=means[k], cov=covariances[k]) * np.sum(
-                        A[:, k] * alphas[-1, :])
-            else:
-                return 1 / pX * (x[i] - expectations[i])**2 * \
+        # def _to_integrate(x):
+        if i is None and expectations is None:
+            _to_integrate = lambda *x: 1 / pX * multivariate_normal.pdf(
+                x, mean=means[k], cov=covariances[k]) * np.sum(A[:, k] *
+                                                               alphas[-1, :])
+        #         return 1 / pX * multivariate_normal.pdf(
+        #             x, mean=means[k], cov=covariances[k]) * np.sum(
+        #                 A[:, k] * alphas[-1, :])
+        elif expectations is None:
+            _to_integrate = lambda *x: 1 / pX * x[i] * multivariate_normal.pdf(
+                x, mean=means[k], cov=covariances[k]) * np.sum(A[:, k] *
+                                                               alphas[-1, :])
+        else:
+            _to_integrate = lambda *x: 1 / pX * (x[i] - expectations[i])**2 * \
                     multivariate_normal.pdf(
                         x, mean=means[k], cov=covariances[k]) * np.sum(
                             A[:, k] * alphas[-1, :])
 
-        print(interv)
-        res, err = integrate.nquad(_to_integrate, interv)
+    # _to_integrate = lambda *x: 1 / pX * multivariate_normal.pdf(
+    #      x, mean=means[k], cov=covariances[k]) * np.sum(A[:, k] * alphas[
+    #          -1, :])
+        res, err = integrate.nquad(_to_integrate, interval)
         prob += res
 
     return prob
@@ -248,14 +252,15 @@ def results_recap(labels_true,
         results['max_probabilities_couples'] = res
     return results
 
-def prepare_data_to_predict(X,p):
-    N,d = X.shape
-    if N<=p:
-        raise ValueError('Not enough observation for '+str(p)+'memory')
-    dataX = np.zeros((np.size(X,axis=0)-p,p*d))
+
+def prepare_data_to_predict(X, p):
+    N, d = X.shape
+    if N <= p:
+        raise ValueError('Not enough observation for ' + str(p) + 'memory')
+    dataX = np.zeros((np.size(X, axis=0) - p, p * d))
     dataY = np.zeros((np.size(X, axis=0) - p, d))
-    for i in range(p,np.size(X,axis=0)):
-        temp = X[i-p:i,:]
-        dataX[i-p,:] = X[i-p:i,:].reshape((1,np.size(temp)))
-        dataY[i-p,:] = X[i,:]
+    for i in range(p, np.size(X, axis=0)):
+        temp = X[i - p:i, :]
+        dataX[i - p, :] = X[i - p:i, :].reshape((1, np.size(temp)))
+        dataY[i - p, :] = X[i, :]
     return dataX, dataY

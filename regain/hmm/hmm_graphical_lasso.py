@@ -397,20 +397,24 @@ class HMM_GraphicalLasso(GraphicalLasso):
     def predict(self, X, method='viterbi'):
 
         if method == 'viterbi':
-            results = viterbi_path(X, self.state_change, self.prob, self.pis_)
+            results = viterbi_path(self.pis_, self.probabilities_,
+                                   self.state_change, self.mode)
             state = np.random.choice(np.arange(self.n_clusters),
                                      replace=True,
                                      p=self.state_change[int(results[-1]), :])
             sample = np.random.multivariate_normal(self.means_[state],
                                                    self.covariances_[state], 1)
-            prob = probability_next_point(self.means_, self.covariances_,
-                                          self.alphas_, self.state_change,
-                                          self.mode, state)
+            # prob = probability_next_point(self.means_,
+            #                               self.covariances_,
+            #                               self.alphas_,
+            #                               self.state_change,
+            #                               self.mode,
+            #                               state=state)
             prediction = dict(pred=sample,
                               means=self.means_[state],
                               stds=np.sqrt(
-                                  self.covariances_[state].diagonal()),
-                              prob_sample=prob)
+                                  self.covariances_[state].diagonal()))  #,
+            # prob_sample=prob)
         elif method == 'hassan':
             pXn = np.sum(self.probabilities_ * self.gammas_, axis=1)
             delpX_n = np.abs(pXn - pXn[-1])
@@ -418,13 +422,14 @@ class HMM_GraphicalLasso(GraphicalLasso):
             state = np.argmax(self.gammas_[n_sim, :])
             delta = X[n_sim + 1, :] - X[n_sim, :]
             sample = X[-1, :] + delta
-            prob = probability_next_point(self.means_, self.covariances_,
-                                          self.alphas_, self.state_change,
-                                          self.mode, state)
+            # prob = probability_next_point(self.means_, self.covariances_,
+            #                               self.alphas_, self.state_change,
+            #                               self.mode, state)
             prediction = dict(pred=sample,
                               means=self.means_[state],
-                              stds=np.sqrt(self.cov[state].diagonal()),
-                              prob_sample=prob)
+                              stds=np.sqrt(
+                                  self.covariances_[state].diagonal()))  #,
+            # prob_sample=prob)
         elif method == 'integral':
             D, K = self.means_.shape
             expectations = []
@@ -435,11 +440,11 @@ class HMM_GraphicalLasso(GraphicalLasso):
                     self.alphas_,
                     self.state_change,
                     self.mode,
-                    x=d,
-                    interval=[
-                        [-np.inf, np.inf]  # possibly must be reduced
-                        for d in range(self.means_.shape[1])
-                    ])
+                    i=d,
+                    # interval should theoretically be -inf, inf, we reduce it
+                    # for computational reason
+                    interval=[[-3 * np.std(X[:, d]), 3 * np.std(X[:, d])]
+                              for d in range(self.means_.shape[1])])
                 expectations.append(prob)
 
             variances = []
@@ -451,11 +456,9 @@ class HMM_GraphicalLasso(GraphicalLasso):
                     self.alphas_,
                     self.state_change,
                     self.mode,
-                    x=d,
-                    interval=[
-                        [-np.inf, np.inf]  # possibly must be reduced
-                        for d in range(self.means_.shape[1])
-                    ],
+                    i=d,
+                    interval=[[-3 * np.std(X[:, d]), 3 * np.std(X[:, d])]
+                              for d in range(self.means_.shape[1])],
                     expectations=expectations)
                 variances.append(prob)
 
@@ -468,7 +471,7 @@ class HMM_GraphicalLasso(GraphicalLasso):
                                           self.alphas_,
                                           self.state_change,
                                           self.mode,
-                                          x=d,
+                                          i=d,
                                           interval=intervals_conf)
 
             sample = np.random.multivariate_normal(expectations,
