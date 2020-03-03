@@ -34,7 +34,7 @@ import warnings
 import numpy as np
 from joblib import Parallel, delayed
 from regain.covariance.graphical_lasso_ import GraphicalLasso, graphical_lasso
-from regain.hmm.utils import probability_next_point, viterbi_path
+from regain.hmm.utils import probability_next_point, viterbi_path,alpha_heuristic
 from scipy.stats import multivariate_normal
 from sklearn.cluster import KMeans
 from sklearn.covariance import empirical_covariance
