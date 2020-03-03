@@ -94,6 +94,7 @@ def generate_hmm(n_samples=100,
                 covariances.append(linalg.pinv(precisions[k]))
             else:
                 covariances.append(make_spd_matrix(n_dim_obs))
+                precisions.append(linalg.pinv(covariances[k]))
 
     if mode_mean == 'Normal':
         means = [

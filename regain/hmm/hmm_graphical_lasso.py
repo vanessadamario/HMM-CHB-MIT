@@ -29,12 +29,14 @@
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 from __future__ import division
 
+import math
 import warnings
 
 import numpy as np
 from joblib import Parallel, delayed
 from regain.covariance.graphical_lasso_ import GraphicalLasso, graphical_lasso
-from regain.hmm.utils import probability_next_point, viterbi_path,alpha_heuristic
+from regain.hmm.utils import (alpha_heuristic, probability_next_point,
+                              viterbi_path)
 from scipy.stats import multivariate_normal
 from sklearn.cluster import KMeans
 from sklearn.covariance import empirical_covariance
@@ -90,10 +92,18 @@ def forward_backward(X, pis, probabilities, A):
 
 def compute_likelihood(gammas, pis, xi, A, probabilities):
     N, K = probabilities.shape
-    pis = pis + 1e-200
+    if np.any(pis == 0):
+        pis = pis + 1e-10
+    if np.any(A == 0):
+        A = A + 1e-10
     aux = np.sum(gammas[0, :] * np.log(pis))
     for n in range(N - 1):
         aux += np.sum(xi[n, :, :] * np.log(A))
+
+    if np.any(probabilities == 0):
+        probabilities = probabilities + \
+                        np.min(probabilities[probabilities != 0])
+
     aux += np.sum(gammas * np.log(probabilities))
     return aux
 
@@ -109,6 +119,9 @@ def _initialization(X, K, init_params, alpha):
         clusters = KMeans(n_clusters=K).fit(X).labels_
 
         for i, l in enumerate(np.unique(clusters)):
+            means[i, :] = np.mean(X[np.where(clusters == l)[0], :], axis=0)
+            emp_cov = empirical_covariance(X - means[i, :],
+                                           assume_centered=True)
             if alpha == 'auto':
                 a = alpha_heuristic(emp_cov,
                                     np.size(X[np.where(clusters == l)[0], :],
@@ -116,10 +129,6 @@ def _initialization(X, K, init_params, alpha):
                                     gamma=0.01)
             else:
                 a = alpha
-            means[i, :] = np.mean(X[np.where(clusters == l)[0], :], axis=0)
-            emp_cov = empirical_covariance(X - means[i, :],
-                                           assume_centered=True)
-
             thetas.append(graphical_lasso(emp_cov, alpha=a)[0])
             covariances = [np.linalg.pinv(t) for t in thetas]
     elif str(init_type).lower() == 'gmm':
@@ -196,7 +205,10 @@ def hmm_graphical_lasso(X,
 
         # M-step
         pis = gammas[0, :] / np.sum(gammas[0, :])
-        lambdas = alpha / np.sum(gammas, axis=0)  # should be of length K
+        if not isinstance(alpha, str):
+            lambdas = alpha / np.sum(gammas, axis=0)  # should be of length K
+        else:
+            lambdas = np.zeros(K)
         thetas_old = thetas
         thetas = []
         for k in range(K):
@@ -244,7 +256,7 @@ def hmm_graphical_lasso(X,
 
     out = [
         thetas, means, A, pis, gammas, probabilities, alphas, covariances,
-        likelihood_
+        betas, xi, likelihood_
     ]
     return out
 
@@ -334,18 +346,21 @@ class HMM_GraphicalLasso(GraphicalLasso):
                             warm_restart, tol):
             means, covariances, A, pis = _initialization(
                 X, K, init_params, alpha)
-            out = hmm_graphical_lasso(X,
-                                      A,
-                                      pis,
-                                      means,
-                                      covariances,
-                                      alpha=alpha,
-                                      max_iter=max_iter,
-                                      mode=mode,
-                                      verbose=verbose,
-                                      warm_restart=warm_restart,
-                                      tol=tol)
-            return out
+            thetas, means, A, pis, gammas, probabilities, alphas, covariances,\
+                betas, xi, likelihood_ = hmm_graphical_lasso(
+                                              X,
+                                              A,
+                                              pis,
+                                              means,
+                                              covariances,
+                                              alpha=alpha,
+                                              max_iter=max_iter,
+                                              mode=mode,
+                                              verbose=verbose,
+                                              warm_restart=warm_restart,
+                                              tol=tol)
+            return thetas, means, A, pis, gammas, probabilities, alphas, \
+                   covariances, betas, xi, likelihood_
 
         if self.repetitions == 1:
             out = [
@@ -373,6 +388,8 @@ class HMM_GraphicalLasso(GraphicalLasso):
         self.probabilities_ = out[best_repetition][5]
         self.alphas_ = out[best_repetition][6]
         self.covariances_ = out[best_repetition][7]
+        self.betas_ = out[best_repetition][8]
+        self.xi_ = out[best_repetition][9]
         self.labels_ = np.argmax(self.gammas_, axis=1)
 
         return self
