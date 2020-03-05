@@ -148,7 +148,7 @@ def _initialization(X, K, init_params, alpha):
     elif str(init_type).lower() == 'random_uniform':
         pis = np.random.uniform(0, 1, K)
         pis /= np.sum(pis)
-        A = np.random.uniform(0, 1, shape=(K, K))
+        A = np.random.uniform(0, 1, (K, K))
         A /= np.sum(A, axis=1)[:, np.newaxis]
     elif str(init_type).lower() == 'random_dirichlet':
         pis = np.random.dirichlet(np.ones(K), 1)
@@ -213,8 +213,7 @@ def hmm_graphical_lasso(X,
         thetas = []
         emp_cov = []
         for k in range(K):
-            means[k, :] = np.sum(gammas[:, k][:, np.newaxis] * X,
-                                 axis=0) / np.sum(gammas[:, k])
+            means[k, :] = np.sum(gammas[:, k][:, np.newaxis] * X,axis=0) / np.sum(gammas[:, k])
             # not sure it is like this
             S_k = (gammas[:, k][:, np.newaxis] *
                    (X - means[k, :])).T.dot(X - means[k, :]) / np.sum(

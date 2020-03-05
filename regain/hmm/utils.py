@@ -1,4 +1,5 @@
 import numpy as np
+import pandas as pd
 from regain.utils import structure_error
 from scipy import integrate, stats
 from scipy.stats import multivariate_normal
@@ -7,7 +8,9 @@ from sklearn.metrics.cluster import (adjusted_mutual_info_score,
                                      contingency_matrix,
                                      homogeneity_completeness_v_measure)
 from tqdm import tqdm
-
+from itertools import combinations
+import matplotlib.pyplot as plt
+import seaborn as sns
 
 def alpha_heuristic(emp_cov, n_samples, gamma=0.1):
     if n_samples < 3:
@@ -264,3 +267,39 @@ def prepare_data_to_predict(X, p):
         dataX[i - p, :] = X[i - p:i, :].reshape((1, np.size(temp)))
         dataY[i - p, :] = X[i, :]
     return dataX, dataY
+
+def spread_pred_interpretation(pred,real,plot=False):
+
+    N,var = pred.shape
+    comb = combinations(list(range(var)), 2)
+    comb_list = list(comb)
+    N_comb = len(comb_list)
+    tab_real = np.zeros((N,N_comb))
+    tab_pred = np.zeros((N, N_comb))
+    tab_res = np.zeros((N, N_comb))
+    names_col = []
+    for n in range(N):
+        for j,couple in enumerate(comb_list):
+
+            if n==0:
+                names_col.append('var'+str(couple[0])+'- var'+str(couple[1]))
+            tab_pred[n,j] = pred[n,couple[0]] - pred[n,couple[1]]
+            tab_real[n, j] = real[n, couple[0]] - real[n, couple[1]]
+
+            if (np.sign(tab_pred[n,j]) == np.sign(tab_real[n,j])) or (tab_real[n,j] == tab_pred[n,j]) :
+                tab_res[n,j] = 1
+            else:
+                tab_res[n, j] = 0
+
+
+
+    df_pred = pd.DataFrame(tab_pred, columns=names_col)
+    df_real = pd.DataFrame(tab_real, columns=names_col)
+    df_res = pd.DataFrame(tab_res, columns=names_col)
+
+    if plot:
+        sns.heatmap(df_res)
+        plt.show()
+    return df_pred, df_real,df_res, np.mean(tab_res),np.mean(tab_res,axis=0)
+
+

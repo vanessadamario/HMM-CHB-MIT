@@ -55,7 +55,6 @@ def _incremental_hmm_graphical_lasso(X, n_for_init, thetas, mode, means,
                                      probabilities, alphas, betas, xi, alpha,
                                      window):
     N, _ = X.shape
-    print('Init',np.size(xi,axis=0))
     for n in range(n_for_init, N):
         K = np.size(means, axis=0)
         probability = np.zeros(K)
@@ -94,7 +93,6 @@ def _incremental_hmm_graphical_lasso(X, n_for_init, thetas, mode, means,
             betas = np.vstack((betas, betas_t1))
             gammas = np.vstack((gammas, gamma_t1))
             xi[-1, :, :] = xi_t1
-            print('Update',np.size(xi,axis=0))
         else:
             for k in range(K):
                 alphas_t1[k] = probabilities[-1, k] * np.sum(
