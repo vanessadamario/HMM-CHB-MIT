@@ -39,8 +39,8 @@ import numpy as np
 from regain.covariance.kernel_time_graphical_lasso_ import (
     KernelTimeGraphicalLasso, kernel_time_graphical_lasso)
 from regain.covariance.missing_graphical_lasso_ import (
-    LatentMissingGraphicalLasso, _compute_cs, _compute_empirical_covariance,
-    _compute_mean)
+    MissingGraphicalLasso, _compute_mean, compute_cs,
+    compute_empirical_covariance)
 from regain.covariance.time_graphical_lasso_ import loss
 from regain.norm import l1_norm
 from regain.scores import BIC_t, EBIC_m_t, EBIC_t, log_likelihood_t
