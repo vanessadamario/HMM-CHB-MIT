@@ -211,6 +211,7 @@ def hmm_graphical_lasso(X,
             lambdas = np.zeros(K)
         thetas_old = thetas
         thetas = []
+        emp_cov = []
         for k in range(K):
             means[k, :] = np.sum(gammas[:, k][:, np.newaxis] * X,
                                  axis=0) / np.sum(gammas[:, k])
@@ -218,6 +219,8 @@ def hmm_graphical_lasso(X,
             S_k = (gammas[:, k][:, np.newaxis] *
                    (X - means[k, :])).T.dot(X - means[k, :]) / np.sum(
                        gammas[:, k])
+            emp_cov.append(S_k)
+
             if alpha == 'auto':
                 lambdas[k] = alpha_heuristic(S_k,
                                              math.floor(np.sum(gammas[:, k])),
@@ -256,7 +259,7 @@ def hmm_graphical_lasso(X,
 
     out = [
         thetas, means, A, pis, gammas, probabilities, alphas, covariances,
-        betas, xi, likelihood_
+        betas, xi,emp_cov, likelihood_
     ]
     return out
 
@@ -341,13 +344,12 @@ class HMM_GraphicalLasso(GraphicalLasso):
         # A = A / np.sum(A, axis=0)[:, np.newaxis]
         N, d = X.shape
         K = self.n_clusters
-
         def _to_parallelize(X, K, init_params, alpha, max_iter, mode, verbose,
                             warm_restart, tol):
             means, covariances, A, pis = _initialization(
                 X, K, init_params, alpha)
             thetas, means, A, pis, gammas, probabilities, alphas, covariances,\
-                betas, xi, likelihood_ = hmm_graphical_lasso(
+                betas, xi,emp_cov, likelihood_ = hmm_graphical_lasso(
                                               X,
                                               A,
                                               pis,
@@ -359,8 +361,8 @@ class HMM_GraphicalLasso(GraphicalLasso):
                                               verbose=verbose,
                                               warm_restart=warm_restart,
                                               tol=tol)
-            return thetas, means, A, pis, gammas, probabilities, alphas, \
-                   covariances, betas, xi, likelihood_
+            return thetas, means, A, pis, gammas, probabilities, alphas, covariances,\
+                betas, xi,emp_cov, likelihood_
 
         if self.repetitions == 1:
             out = [
@@ -390,11 +392,12 @@ class HMM_GraphicalLasso(GraphicalLasso):
         self.covariances_ = out[best_repetition][7]
         self.betas_ = out[best_repetition][8]
         self.xi_ = out[best_repetition][9]
+        self.emp_cov_ = out[best_repetition][10]
         self.labels_ = np.argmax(self.gammas_, axis=1)
 
         return self
 
-    def predict(self, X, method='viterbi'):
+    def predict(self, X, method='viterbi',conf_inter = False):
 
         if method == 'viterbi':
             results = viterbi_path(self.pis_, self.probabilities_,
@@ -404,17 +407,26 @@ class HMM_GraphicalLasso(GraphicalLasso):
                                      p=self.state_change[int(results[-1]), :])
             sample = np.random.multivariate_normal(self.means_[state],
                                                    self.covariances_[state], 1)
-            # prob = probability_next_point(self.means_,
-            #                               self.covariances_,
-            #                               self.alphas_,
-            #                               self.state_change,
-            #                               self.mode,
-            #                               state=state)
-            prediction = dict(pred=sample,
+
+            if conf_inter:
+                prob = probability_next_point(self.means_,
+                                              self.covariances_,
+                                              self.alphas_,
+                                              self.state_change,
+                                              self.mode,
+                                              state=state)
+                prediction = dict(pred=sample,
                               means=self.means_[state],
                               stds=np.sqrt(
-                                  self.covariances_[state].diagonal()))  #,
-            # prob_sample=prob)
+                                  self.covariances_[state].diagonal()),
+                              prob_sample=prob)
+            else:
+                prediction = dict(pred=sample,
+                              means=self.means_[state],
+                              stds=np.sqrt(
+                                  self.covariances_[state].diagonal()))
+
+
         elif method == 'hassan':
             pXn = np.sum(self.probabilities_ * self.gammas_, axis=1)
             delpX_n = np.abs(pXn - pXn[-1])
@@ -422,14 +434,22 @@ class HMM_GraphicalLasso(GraphicalLasso):
             state = np.argmax(self.gammas_[n_sim, :])
             delta = X[n_sim + 1, :] - X[n_sim, :]
             sample = X[-1, :] + delta
-            # prob = probability_next_point(self.means_, self.covariances_,
-            #                               self.alphas_, self.state_change,
-            #                               self.mode, state)
-            prediction = dict(pred=sample,
+
+            if conf_inter:
+                prob = probability_next_point(self.means_, self.covariances_,
+                                          self.alphas_, self.state_change,
+                                           self.mode, state)
+                prediction = dict(pred=sample,
                               means=self.means_[state],
                               stds=np.sqrt(
-                                  self.covariances_[state].diagonal()))  #,
-            # prob_sample=prob)
+                                  self.covariances_[state].diagonal()),
+                              prob_sample=prob)
+            else:
+                prediction = dict(pred=sample,
+                              means=self.means_[state],
+                              stds=np.sqrt(
+                                  self.covariances_[state].diagonal()))
+
         elif method == 'integral':
             D, K = self.means_.shape
             expectations = []

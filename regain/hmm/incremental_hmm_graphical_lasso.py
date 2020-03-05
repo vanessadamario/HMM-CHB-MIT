@@ -39,15 +39,15 @@ from scipy.stats import multivariate_normal
 from sklearn.utils.validation import check_array
 
 
-def NormAlphaUpdate(K, alp, A, prob):
+#def NormAlphaUpdate(K, alp, A, prob):
     #alp[-1, :].dot(A).dot(prob[-1,:].T)
-    s2 = 0
-    for k in range(K):
-        s1 = 0
-        for j in range(K):
-            s1 += alp[-1, j] * A[j, k]
-        s2 += s1 * prob[-1, k]
-    return s2
+#    s2 = 0
+#   for k in range(K):
+#        s1 = 0
+#        for j in range(K):
+#            s1 += alp[-1, j] * A[j, k]
+#       s2 += s1 * prob[-1, k]
+#    return s2
 
 
 def _incremental_hmm_graphical_lasso(X, n_for_init, thetas, mode, means,
@@ -55,11 +55,12 @@ def _incremental_hmm_graphical_lasso(X, n_for_init, thetas, mode, means,
                                      probabilities, alphas, betas, xi, alpha,
                                      window):
     N, _ = X.shape
+    print('Init',np.size(xi,axis=0))
     for n in range(n_for_init, N):
         K = np.size(means, axis=0)
         probability = np.zeros(K)
         for k in range(K):
-            probability[k] = multivariate_normal.pdf(X[n:],
+            probability[k] = multivariate_normal.pdf(X[n,:],
                                                      mean=means[k, :],
                                                      cov=covariances[k])
 
@@ -70,12 +71,16 @@ def _incremental_hmm_graphical_lasso(X, n_for_init, thetas, mode, means,
         betas_t1 = np.zeros(K)
         xi_t1 = np.zeros((K, K))
 
+        xi_update = np.zeros((n, K, K))
+        for nn in range(n-1):
+            xi_update[nn, :, :] = xi[nn, :, :]
+        xi = xi_update
+
         if mode == 'scaled':
             for k in range(K):
                 alphas_t1[k] = np.sum(alphas[-1, :] * A[:, k]) * probabilities[
                     -1, k] / alphas[-1, :].dot(A).dot(probabilities[-1, :].T)
-                betas_t1[k] = (betas[-1, k] * NormAlphaUpdate(
-                    K, alphas, A, probabilities)) / np.sum(
+                betas_t1[k] = (betas[-1, k] * alphas[-1, :].dot(A).dot(probabilities[-1, :].T) )/ np.sum(
                         A[k, :] * probabilities[-1, :])
 
             gamma_t1 = alphas_t1 * betas_t1 / (np.sum(alphas_t1 * betas_t1))
@@ -89,6 +94,7 @@ def _incremental_hmm_graphical_lasso(X, n_for_init, thetas, mode, means,
             betas = np.vstack((betas, betas_t1))
             gammas = np.vstack((gammas, gamma_t1))
             xi[-1, :, :] = xi_t1
+            print('Update',np.size(xi,axis=0))
         else:
             for k in range(K):
                 alphas_t1[k] = probabilities[-1, k] * np.sum(
@@ -117,62 +123,48 @@ def _incremental_hmm_graphical_lasso(X, n_for_init, thetas, mode, means,
             lambdas = alpha / np.sum(gammas[-n_for_init:], axis=0)
         else:
             lambdas = alpha / np.sum(gammas, axis=0)
-        thetas_update = []
-        means_update = np.zeros((np.size(means, axis=0), np.size(means,
-                                                                 axis=1)))
-        emp_cov = []
-        A_update = np.zeros((np.size(A, axis=0), np.size(A, axis=1)))
         for k in range(K):
             if window:
                 means[k, :] = (
                     np.sum(gammas[-n_for_init:, k] * X[-n_for_init:, k]) /
                     np.sum(gammas[-n_for_init:, k]))
                 S_k = (gammas[-n_for_init:, k][:, np.newaxis] *
-                              (X[-n_for_init:, :] - means_update[k, :])).T.dot(
-                                    X[-n:, :] - means_update[k, :]) / \
+                              (X[-n_for_init:, :] - means[k, :])).T.dot(
+                                    X[-n:, :] - means[k, :]) / \
                               np.sum(gammas[-n_for_init:, k])
                 for j in range(K):
-                    A_update[j, k] = np.sum(xi[-(n_for_init - 1):, j,
+                    A[j, k] = np.sum(xi[-(n_for_init - 1):, j,
                                                k]) / np.sum(
                                                    gammas[-n_for_init:-1, j])
             else:
-                means[k, :] = ((np.sum(gammas[:-1, k]) / np.sum(gammas[:, k]) *
-                                means[k, :]) +
-                               (gammas[-1, k] / np.sum(gammas[:, k]) * X[n:]))
-
-                S_k = np.sum(gammas[:-1, k]) / np.sum(
-                    gammas[:, k]) * emp_cov[k] + gammas[-1, k] / np.sum(
-                        gammas[:, k]) * (X[n:] - means_update[k, :]
-                                         ).T.dot(X[n:] - means_update[k, :])
+                means[k, :] = (np.sum(gammas[:-1, k]) / np.sum(gammas[:, k]) *
+                                means[k, :]) +(gammas[-1, k] / np.sum(gammas[:, k]) * X[n,:])
+                S_k = np.sum(gammas[:-1, k]) / np.sum(gammas[:, k]) * emp_cov[k] + gammas[-1, k] / np.sum(
+                        gammas[:, k]) * (X[n,:] - means[k, :]).T.dot(X[n,:] - means[k, :])
+                emp_cov[k] = S_k
                 for j in range(K):
-                    A_update[j,
-                             k] = (np.sum(gammas[:-2, j]) * A[j, k]) / (np.sum(
+                    A[j, k] = (np.sum(gammas[:-2, j]) * A[j, k]) / (np.sum(
                                  gammas[:-1, j])) + (xi[-1, j, k] /
                                                      np.sum(gammas[:-1, j]))
-            emp_cov.append(S_k)
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore")
-                thetas.append(
-                    graphical_lasso(S_k, alpha=lambdas[k], init=thetas[k])[0])
+                thetas[k] = graphical_lasso(S_k, alpha=lambdas[k], init=thetas[k])[0]
 
-        covariances = [np.linalg.pinv(t) for t in thetas_update]
-        probabilities_update = np.zeros(
-            (np.size(probabilities, axis=0), np.size(probabilities, axis=1)))
+        covariances = [np.linalg.pinv(t) for t in thetas]
         for n in range(np.size(probabilities, axis=0)):
             for k in range(np.size(probabilities, axis=1)):
                 probabilities[n, k] = multivariate_normal.pdf(
-                    X[n, :], mean=means_update[k, :], cov=covariances[k])
+                    X[n, :], mean=means[k, :], cov=covariances[k])
 
-        likelihood_ = compute_likelihood(gammas, pis, xi, A_update,
-                                         probabilities_update)
+        likelihood_ = compute_likelihood(gammas, pis, xi, A,probabilities)
 
-        res = [
-            thetas, means, covariances, emp_cov, A_update, pis, gammas,
+    res = [
+            thetas, means, covariances, emp_cov, A, pis, gammas,
             probabilities, alphas, betas, xi, likelihood_
         ]
-        return res
+    return res
 
-    return likelihood_, thetas, means, A, pis, gammas, probabilities, alphas
+
 
 
 class Incremental_HMM_GraphicalLasso(HMM_GraphicalLasso):
@@ -222,24 +214,23 @@ class Incremental_HMM_GraphicalLasso(HMM_GraphicalLasso):
                  max_iter=100,
                  tol=1e-4,
                  verbose=False,
-                 n_for_init=50,
+                 n_for_init=200,
                  window=False,
                  warm_restart=False,
                  init_params=dict(),
                  mode='scaled',
                  repetitions=1,
                  n_jobs=-1):
-        super(Incremental_HMM_GraphicalLasso,
-              alpha=alpha,
-              tol=tol,
-              max_iter=max_iter,
-              mode=mode,
-              verbose=verbose,
-              n_clusters=n_clusters,
-              init_params=init_params,
-              warm_restart=warm_restart,
-              repetitions=repetitions,
-              n_jobs=n_jobs)
+        super().__init__(alpha=alpha,
+                          tol=tol,
+                          max_iter=max_iter,
+                          mode=mode,
+                          verbose=verbose,
+                          n_clusters=n_clusters,
+                          init_params=init_params,
+                          warm_restart=warm_restart,
+                          repetitions=repetitions,
+                          n_jobs=n_jobs)
         self.n_for_init = n_for_init
         self.window = window
 
@@ -252,6 +243,7 @@ class Incremental_HMM_GraphicalLasso(HMM_GraphicalLasso):
             Data matrix that represents a temporal sequence of data.
         """
         # Covariance does not make sense for a single feature
+
         X = check_array(X,
                         ensure_min_features=2,
                         ensure_min_samples=2,
@@ -265,22 +257,27 @@ class Incremental_HMM_GraphicalLasso(HMM_GraphicalLasso):
         else:
             X_ = X
 
-        super.fit(Incremental_HMM_GraphicalLasso, X_)
+        super().fit(X_)
 
         if incremental:
             out = _incremental_hmm_graphical_lasso(
                 X, self.n_for_init, self.precisions_, self.mode, self.means_,
-                self.covariances_, self.state_change, self.gammas_,
+                self.covariances_,self.emp_cov_, self.state_change, self.gammas_,
                 self.probabilities_, self.alphas_, self.betas_, self.xi_,
                 self.alpha, self.window)
-            self.likelihood_ = out[0]
-            self.precisions_ = out[1]
-            self.means_ = out[2]
-            self.state_change = out[3]
-            self.pis_ = out[4]
-            self.gammas_ = out[5]
-            self.probabilities_ = out[6]
-            self.alphas_ = out[7]
+
+            self.precisions_ = out[0]
+            self.means_ = out[1]
+            self.covariances_ = out[2]
+            self.emp_cov_ = out[3]
+            self.state_change = out[4]
+            self.pis_ = out[5]
+            self.gammas_ = out[6]
+            self.probabilities_ = out[7]
+            self.alphas_ = out[8]
+            self.betas_ = out[9]
+            self.xi_ = out[10]
+            self.likelihood_ = out[11]
             self.labels_ = np.argmax(self.gammas_, axis=1)
 
         return self
