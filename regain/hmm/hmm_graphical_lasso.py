@@ -258,7 +258,7 @@ def hmm_graphical_lasso(X,
 
     out = [
         thetas, means, A, pis, gammas, probabilities, alphas, covariances,
-        betas, xi,emp_cov, likelihood_
+        betas, xi,emp_cov,lambdas, likelihood_
     ]
     return out
 
@@ -348,7 +348,7 @@ class HMM_GraphicalLasso(GraphicalLasso):
             means, covariances, A, pis = _initialization(
                 X, K, init_params, alpha)
             thetas, means, A, pis, gammas, probabilities, alphas, covariances,\
-                betas, xi,emp_cov, likelihood_ = hmm_graphical_lasso(
+                betas, xi,emp_cov,lambdas, likelihood_ = hmm_graphical_lasso(
                                               X,
                                               A,
                                               pis,
@@ -361,7 +361,7 @@ class HMM_GraphicalLasso(GraphicalLasso):
                                               warm_restart=warm_restart,
                                               tol=tol)
             return thetas, means, A, pis, gammas, probabilities, alphas, covariances,\
-                betas, xi,emp_cov, likelihood_
+                betas, xi,emp_cov,lambdas, likelihood_
 
         if self.repetitions == 1:
             out = [
@@ -392,6 +392,7 @@ class HMM_GraphicalLasso(GraphicalLasso):
         self.betas_ = out[best_repetition][8]
         self.xi_ = out[best_repetition][9]
         self.emp_cov_ = out[best_repetition][10]
+        self.lambdas = out[best_repetition][11]
         self.labels_ = np.argmax(self.gammas_, axis=1)
 
         return self

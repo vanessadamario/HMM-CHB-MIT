@@ -70,6 +70,7 @@ def generate_hmm(n_samples=100,
                  max_transition_window=20,
                  sigma=0.7,
                  stability_factor=12,
+                 order_hmm = 1,
                  **kwargs):
     """
     transition_type: string, optional default='sudden'
@@ -84,9 +85,9 @@ def generate_hmm(n_samples=100,
     precisions, covariances, means = [], [], []
     if mode_precisions == 'complementary':
         covariances, precisions = generate_complementary_precisions_matrix(
-            n_dim_obs, n_states)
+            n_dim_obs, n_states ** order_hmm)
     else:
-        for k in range(n_states):
+        for k in range(n_states ** order_hmm):
             if mode_precisions == 'regain':
                 precisions.append(
                     make_starting(n_dim_obs=n_dim_obs, n_dim_lat=0,
@@ -98,35 +99,41 @@ def generate_hmm(n_samples=100,
 
     if mode_mean == 'Normal':
         means = [
-            np.random.normal(0, sigma, n_dim_obs) for k in range(n_states)
+            np.random.normal(0, sigma, n_dim_obs) for k in range(n_states ** order_hmm)
         ]
     elif mode_mean == 'Uniform':
         min_max = np.random.uniform(-50, 50, 2)
         means = [
             np.random.uniform(min(min_max), max(min_max), n_dim_obs)
-            for k in range(n_states)
+            for k in range(n_states ** order_hmm)
         ]
     else:
         raise ValueError('Unknown mode_mean type')
 
     # Generate a transition matrix
-    A = np.zeros((n_states, n_states))
-    for i in range(n_states):
-        alphas = np.ones(n_states)
-        alphas[i] = stability_factor * alphas[i]
-        A[i, :] = np.random.dirichlet(alphas, 1)
-
+    A = np.zeros((n_states ** order_hmm, n_states ** order_hmm))
+    if order_hmm==1:
+        for i in range(n_states):
+            alphas = np.ones(n_states)
+            alphas[i] = stability_factor * alphas[i]
+            A[i, :] = np.random.dirichlet(alphas, 1)
+    else:
+        for i in range(n_states ** order_hmm):
+            index_fill = np.zeros(n_states ** order_hmm, bool)
+            for j in range(n_states ** order_hmm):
+                index_fill[j] = np.floor((i) / n_states) == (j) - np.floor((j) / (n_states ** (order_hmm - 1))) * n_states ** (order_hmm - 1)
+            A[i, index_fill] = np.random.dirichlet(np.ones(np.sum(index_fill)), 1)
     state = 0
     states = []
     data = np.zeros((n_samples, n_dim_obs))
-    gammas = np.zeros((n_samples, n_states))
+    gammas = np.zeros((n_samples, n_states ** order_hmm))
     if transition_type == 'fixed':
         for i in range(n_samples):
             states.append(state)
             gammas[i, state] = 1
             data[i, :] = np.random.multivariate_normal(means[state],
                                                        covariances[state], 1)
-            state = np.random.choice(np.arange(n_states),
+            state = np.random.choice(np.arange(n_states ** order_hmm),
                                      replace=True,
                                      p=A[state, :])
     elif (transition_type == 'fixed_smooth'
@@ -182,3 +189,5 @@ def generate_hmm(n_samples=100,
                states=states,
                gammas=gammas)
     return res
+
+

@@ -158,7 +158,7 @@ def _incremental_hmm_graphical_lasso(X, n_for_init, thetas, mode, means,
 
     res = [
             thetas, means, covariances, emp_cov, A, pis, gammas,
-            probabilities, alphas, betas, xi, likelihood_
+            probabilities, alphas, betas, xi, lambdas, likelihood_
         ]
     return res
 
@@ -275,7 +275,8 @@ class Incremental_HMM_GraphicalLasso(HMM_GraphicalLasso):
             self.alphas_ = out[8]
             self.betas_ = out[9]
             self.xi_ = out[10]
-            self.likelihood_ = out[11]
+            self.lambdas = out[11]
+            self.likelihood_ = out[12]
             self.labels_ = np.argmax(self.gammas_, axis=1)
 
         return self

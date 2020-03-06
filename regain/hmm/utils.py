@@ -145,7 +145,7 @@ def cross_validation(estimator, X, params=None, mode=None, n_repetitions=10):
     """
 
     if params is None:
-        alphas = np.logspace(-3, 3, 10)
+        alphas = np.logspace(-1, 1, 10)
         n_clusters = np.arange(2, 12)
     else:
         alphas = params.get('alpha', np.logspace(-3, 3, 10))
