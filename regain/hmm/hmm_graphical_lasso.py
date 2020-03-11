@@ -419,12 +419,16 @@ class HMM_GraphicalLasso(GraphicalLasso):
                               means=self.means_[state],
                               stds=np.sqrt(
                                   self.covariances_[state].diagonal()),
-                              prob_sample=prob)
+                              prob_sample=prob,
+                              cov=self.covariances_[state],
+                              prec = self.precisions_[state])
             else:
                 prediction = dict(pred=sample,
                               means=self.means_[state],
                               stds=np.sqrt(
-                                  self.covariances_[state].diagonal()))
+                                  self.covariances_[state].diagonal()),
+                              cov = self.covariances_[state],
+                              prec = self.precisions_[state])
 
 
         elif method == 'hassan':
@@ -443,12 +447,16 @@ class HMM_GraphicalLasso(GraphicalLasso):
                               means=self.means_[state],
                               stds=np.sqrt(
                                   self.covariances_[state].diagonal()),
-                              prob_sample=prob)
+                              cov=self.covariances_[state],
+                              prob_sample=prob,
+                              prec = self.precisions_[state])
             else:
                 prediction = dict(pred=sample,
                               means=self.means_[state],
                               stds=np.sqrt(
-                                  self.covariances_[state].diagonal()))
+                                  self.covariances_[state].diagonal()),
+                              cov = self.covariances_[state],
+                              prec = self.precisions_[state])
 
         elif method == 'integral':
             D, K = self.means_.shape

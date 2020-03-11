@@ -11,6 +11,8 @@ from tqdm import tqdm
 from itertools import combinations
 import matplotlib.pyplot as plt
 import seaborn as sns
+import matplotlib.patches as mpatches
+
 
 def alpha_heuristic(emp_cov, n_samples, gamma=0.1):
     if n_samples < 3:
@@ -268,7 +270,26 @@ def prepare_data_to_predict(X, p):
         dataY[i - p, :] = X[i, :]
     return dataX, dataY
 
-def spread_pred_interpretation(pred,real,plot=False):
+def names(var_names,couple):
+    if len(var_names) == 0:
+        return 'var'+str(couple[0])+'- var'+str(couple[1])
+    else:
+        return str(var_names[couple[0]])+'-'+str(var_names[couple[1]])
+
+
+
+def spread_pred_interpretation(df_pred,real, prec = None, cov = None,
+                               means = None,prec_real = None, cov_real = None, means_real = None,
+                               met_pred = None, plot=False):
+
+
+    if isinstance(df_pred, pd.DataFrame):
+        pred = df_pred.values
+        var_names = df_pred.columns
+    else:
+        pred = df_pred
+        var_names = []
+
 
     N,var = pred.shape
     comb = combinations(list(range(var)), 2)
@@ -279,17 +300,78 @@ def spread_pred_interpretation(pred,real,plot=False):
     tab_res = np.zeros((N, N_comb))
     names_col = []
     for n in range(N):
+        temp_all = []
         for j,couple in enumerate(comb_list):
-
+            temp = []
             if n==0:
-                names_col.append('var'+str(couple[0])+'- var'+str(couple[1]))
-            tab_pred[n,j] = pred[n,couple[0]] - pred[n,couple[1]]
-            tab_real[n, j] = real[n, couple[0]] - real[n, couple[1]]
+                if len(var_names) == 0:
+                    names_col.append('var'+str(couple[0])+'- var'+str(couple[1]))
+                else:
+                    names_col.append(str(var_names[couple[0]])+'-'+str(var_names[couple[1]]))
 
-            if (np.sign(tab_pred[n,j]) == np.sign(tab_real[n,j])) or (tab_real[n,j] == tab_pred[n,j]) :
-                tab_res[n,j] = 1
+            #tab_pred[n,j] = pred[n,couple[0]] - pred[n,couple[1]]
+            tab_pred[n, j] = (pred[n, couple[0]]-means[str(n)][couple[0]]) * (pred[n, couple[1]]-means[str(n)][couple[1]])
+            #tab_real[n, j] = real[n, couple[0]] - real[n, couple[1]]
+            tab_real[n, j] = (real[n, couple[0]] -means_real[str(n)][couple[0]])* (real[n, couple[1]]-means_real[str(n)][couple[1]])
+
+            if prec is None:
+                if (np.sign(tab_pred[n,j]) == np.sign(tab_real[n,j])) or (tab_real[n,j] == tab_pred[n,j]) :
+                    print(1)
+                    print('real 1:',real[n, couple[0]] ,means[str(n)][couple[0]] ,real[n, couple[0]] -means_real[str(n)][couple[0]])
+                    print('pred 1:', pred[n, couple[0]], means[str(n)][couple[0]],pred[n, couple[0]] - means[str(n)][couple[0]])
+                    print('real 2:',real[n, couple[1]] ,means[str(n)][couple[1]] ,real[n, couple[1]] -means_real[str(n)][couple[1]])
+                    print('pred 2:', pred[n, couple[1]], means[str(n)][couple[1]],pred[n, couple[1]] - means[str(n)][couple[1]])
+                    tab_res[n,j] = 1
+                else:
+                    print(0)
+                    tab_res[n, j] = 0
             else:
-                tab_res[n, j] = 0
+
+
+                #print(couple[0],couple[1],cov[str(n)][couple[0],couple[1]])
+                if abs(prec[str(n)][couple[0],couple[1]]) <= 0.10:
+                    tab_res[n, j] = 2
+                else:
+                    # print('Precision: real',prec_real[str(n)][couple[0],couple[1]],'pred',prec[str(n)][couple[0],couple[1]])
+                    # print('Covariance: real', cov_real[str(n)][couple[0], couple[1]], 'pred',cov[str(n)][couple[0], couple[1]])
+                    # print('Means: real', means_real[str(n)][couple[0]], means_real[str(n)][couple[1]], 'pred',means[str(n)][couple[0]], means[str(n)][couple[1]])
+                    # print('Value real :',real[n, couple[0]] ,real[n, couple[1]])
+                    # print('Value pred :', pred[n, couple[0]], pred[n, couple[1]])
+                    temp = [
+                            n+1,
+                            names(var_names,couple),
+                            cov[str(n)][couple[0], couple[1]],
+                            cov_real[str(n)][couple[0], couple[1]],
+                            means[str(n)][couple[0]],
+                            means_real[str(n)][couple[0]],
+                            np.sqrt(cov[str(n)][couple[0], couple[0]]),
+                            means[str(n)][couple[1]],
+                            means_real[str(n)][couple[1]],
+                            np.sqrt(cov[str(n)][couple[1], couple[1]])
+                            ]
+
+                    if (np.sign(tab_pred[n, j]) == np.sign(tab_real[n, j])) or (tab_real[n, j] == tab_pred[n, j]):
+                        tab_res[n, j] = 1
+                    else:
+                        print('real 1:', real[n, couple[0]], means[str(n)][couple[0]],
+                              real[n, couple[0]] - means_real[str(n)][couple[0]])
+                        print('pred 1:', pred[n, couple[0]], means[str(n)][couple[0]],
+                              pred[n, couple[0]] - means[str(n)][couple[0]])
+                        print('real 2:', real[n, couple[1]], means[str(n)][couple[1]],
+                              real[n, couple[1]] - means_real[str(n)][couple[1]])
+                        print('pred 2:', pred[n, couple[1]], means[str(n)][couple[1]],
+                              pred[n, couple[1]] - means[str(n)][couple[1]])
+                        tab_res[n, j] = 0
+                if len(temp)!= 0:
+                    temp_all.append(temp)
+        if not prec is None:
+
+            if 'resAll' in locals():
+                df_temp = pd.DataFrame(temp_all,columns=['Day', '1-2', 'Corr 1-2','Corr 1-2_real', 'mean1', 'mean1_real', 'std1', 'mean2', 'mean2_real','std2'])
+                resAll = resAll.append(df_temp, ignore_index=True)
+            else:
+                resAll = pd.DataFrame(temp_all,columns=['Day', '1-2', 'Corr 1-2','Corr 1-2_real', 'mean1', 'mean1_real', 'std1', 'mean2', 'mean2_real','std2'])
+
 
 
 
@@ -298,8 +380,47 @@ def spread_pred_interpretation(pred,real,plot=False):
     df_res = pd.DataFrame(tab_res, columns=names_col)
 
     if plot:
-        sns.heatmap(df_res)
+
+
+
+        if met_pred is None:
+            ## define your color map and value name as a dic
+            t = 1  ## alpha value
+            cmap = { 0: [1.0, 0.1, 0.1, t], 1: [1.0, 0.5, 0.1, t]}
+            labels = {1: 'Same dir', 0: 'Wrong dir'}
+            arrayShow = np.array([[cmap[i] for i in j] for j in df_res.values])
+
+
+        else:
+
+            ## define your color map and value name as a dic
+            t = 1  ## alpha value
+            cmap = {2: [0.1, 0.1, 1.0, t], 0: [1.0, 0.1, 0.1, t], 1: [1.0, 0.5, 0.1, t]}
+            labels = {2: 'No corr', 1: 'Same dir', 0: 'Wrong dir'}
+            arrayShow = np.array([[cmap[i] for i in j] for j in df_res.values])
+
+        ## create patches as legend
+
+        Xlab = df_res.columns
+        Ylab = ['day'+str(i+1) for i in range(np.size(df_res.values,axis=0))]
+
+
+        fig, ax = plt.subplots()
+        patches = [mpatches.Patch(color=cmap[i], label=labels[i]) for i in cmap]
+        ax.set_xticks(np.arange(len(Xlab)))
+        ax.set_yticks(np.arange(len(Ylab)))
+        ax.set_xticklabels(Xlab, rotation=90)
+        ax.set_yticklabels(Ylab)
+
+        ax.imshow(arrayShow)
+        ax.legend(handles=patches, loc='center left', bbox_to_anchor=(1, 0.5))
+        plt.figure(figsize=(10, 10))
         plt.show()
-    return df_pred, df_real,df_res, np.mean(tab_res),np.mean(tab_res,axis=0)
+
+
+    if  'resAll' in locals():
+        return df_pred, df_real, df_res, np.mean(tab_res), np.mean(tab_res, axis=0),resAll
+    else:
+        return df_pred, df_real,df_res, np.mean(tab_res),np.mean(tab_res,axis=0)
 
 

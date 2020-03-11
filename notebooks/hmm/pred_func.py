@@ -9,6 +9,8 @@ import statsmodels.api as sm
 from sklearn.model_selection import GridSearchCV
 from sklearn.kernel_ridge import KernelRidge
 from regain.hmm.hmm_graphical_lasso import HMM_GraphicalLasso
+from regain.hmm.utils import cross_validation,results_recap
+
 
 def computeSqDistMat(X1, X2):
 
@@ -176,19 +178,104 @@ def pred_Kernel_Ridge(X,MultiY,N_test=100):
 
     return Y_kernel
 
-def pred_HMM_GMM(data,K,N_test=100, meth = 'viterbi'):
+def pred_HMM_GMM(data,dataset, K,N_test=100, meth = 'viterbi'):
 
     N_obs = np.size(data,axis=0)
-    Y_HMM_GMM = np.zeros((N_test,np.size(data,axis=1)))
-    Y_HMM_GMM_mean = np.zeros((N_test, np.size(data, axis=1)))
+    Y_HMM_GMM_Viterbi = np.zeros((N_test,np.size(data,axis=1)))
+    Y_HMM_GMM_Hassan = np.zeros((N_test, np.size(data, axis=1)))
+    Y_real = np.zeros((N_test,np.size(data,axis=1)))
+
+    cov_real = {}
+    prec_real = {}
+    means_real = {}
+    cov_Viterbi = {}
+    prec_Viterbi = {}
+    means_Viterbi = {}
+    cov_Hassan = {}
+    prec_Hassan = {}
+    means_Hassan = {}
+    save_res_rec ={}
+    save_pred = {}
+
     for i in range(N_test):
 
         N_obs_train = N_obs - N_test + i
         X_train = data[:N_obs_train, :]
         mdl = HMM_GraphicalLasso(alpha=1, n_clusters=K, verbose=False, mode='scaled',
                                  warm_restart=True, repetitions=10, n_jobs=-1)
-        mdl.fit(X_train)
-        Y_HMM_GMM[i,:] = mdl.predict(X_train,method =meth )['pred']
-        Y_HMM_GMM_mean[i, :] = mdl.predict(X_train, method=meth)['means']
 
-    return Y_HMM_GMM,Y_HMM_GMM_mean
+
+        mmode = 'stability'
+
+
+        if K == 2:
+            alpha_list = np.linspace(45, 65, 20)
+        elif K == 5:
+            alpha_list = np.linspace(25, 35, 20)
+        elif K == 10:
+            alpha_list = np.linspace(15, 25, 20)
+        elif K == 15:
+            alpha_list = np.linspace(5, 15, 20)
+
+        res = cross_validation(mdl,
+                               data,
+                               params={'alpha': alpha_list,
+                                       'n_clusters': [K]},
+                               mode=mmode,
+                               n_repetitions=1)
+
+        # define three different models
+
+        hmm_gmm = HMM_GraphicalLasso(alpha=res[0][0], n_clusters=K, verbose=False, mode='scaled',
+                                     warm_restart=True, repetitions=5, n_jobs=-1)
+
+
+        hmm_gmm.fit(X_train)
+
+        save_res_rec[str(i)] = results_recap(dataset['states'][:N_obs_train],
+                                             hmm_gmm.labels_,
+                                             dataset['thetas'],
+                                             hmm_gmm.precisions_,
+                                             dataset['gammas'][:N_obs_train,:],
+                                             hmm_gmm.gammas_)
+        save_pred[str(i)] = [hmm_gmm.labels_,hmm_gmm.precisions_,hmm_gmm.covariances_]
+
+
+        # real
+        state = dataset['states'][N_obs_train]
+        Y_real[i, :] =  data[N_obs_train, :]
+        prec_real[str(i)] = dataset['thetas'][state]
+        cov_real[str(i)] = dataset['covariances'][state]
+        means_real[str(i)] = dataset['means'][state]
+
+
+
+        # predictions
+        Y_HMM_GMM_Viterbi[i,:] = hmm_gmm.predict(X_train,method =meth )['pred']
+        Y_HMM_GMM_Hassan[i, :] = hmm_gmm.predict(X_train, method='hassan')['pred']
+        cov_Viterbi[str(i)] = hmm_gmm.predict(X_train, method=meth)['cov']
+        prec_Viterbi[str(i)] = hmm_gmm.predict(X_train, method=meth)['prec']
+        means_Viterbi[str(i)] = hmm_gmm.predict(X_train, method=meth)['means']
+        print(str(i), hmm_gmm.predict(X_train, method=meth)['means'])
+        cov_Hassan[str(i)] = hmm_gmm.predict(X_train, method='hassan')['cov']
+        prec_Hassan[str(i)] = hmm_gmm.predict(X_train, method='hassan')['prec']
+        means_Hassan[str(i)] = hmm_gmm.predict(X_train, method='hassan')['means']
+        print(str(i), hmm_gmm.predict(X_train, method='hassan')['means'])
+
+    results = [Y_HMM_GMM_Viterbi,
+               Y_HMM_GMM_Hassan,
+               Y_real,
+               cov_Viterbi,
+               prec_Viterbi,
+               means_Viterbi,
+               cov_Hassan,
+               prec_Hassan,
+               means_Hassan,
+               prec_real,
+               cov_real,
+               means_real,
+               save_res_rec,
+               save_pred ]
+
+
+    return results
