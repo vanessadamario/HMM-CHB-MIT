@@ -176,9 +176,16 @@ def hmm_graphical_lasso(X,
     probabilities = np.zeros((N, K))
     for n in range(N):
         for k in range(K):
-            probabilities[n, k] = multivariate_normal.pdf(X[n, :],
-                                                          mean=means[k, :],
-                                                          cov=covariances[k])
+
+            try:
+                probabilities[n, k] = multivariate_normal.pdf(X[n, :],
+                                                              mean=means[k, :],
+                                                              cov=covariances[k])
+            except:
+                out = np.repeat(np.nan, 13)
+                return out
+
+
     likelihood_ = -np.inf
     thetas = []
     for iter_ in range(max_iter):
@@ -228,22 +235,41 @@ def hmm_graphical_lasso(X,
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore")
                 if warm_restart and iter_ > 0:
-                    thetas.append(
-                        graphical_lasso(S_k,
-                                        alpha=lambdas[k],
-                                        init=thetas_old[k])[0])
+
+                    try:
+                        thetas.append(
+                            graphical_lasso(S_k,
+                                            alpha=lambdas[k],
+                                            init=thetas_old[k])[0])
+                    except:
+                        out = np.repeat(np.nan,13)
+                        return out
+
                 else:
-                    thetas.append(graphical_lasso(S_k, alpha=lambdas[k])[0])
+                    try:
+                        thetas.append(graphical_lasso(S_k, alpha=lambdas[k])[0])
+                    except:
+                        out = np.repeat(np.nan,13)
+                        return out
+
+
+
+
             for j in range(K):
                 A[j, k] = np.sum(xi[:, j, k]) / np.sum(xi[:, j, :])
         covariances = [np.linalg.pinv(t) for t in thetas]
         probabilities = np.zeros((N, K))
         for n in range(N):
             for k in range(K):
-                probabilities[n,
-                              k] = multivariate_normal.pdf(X[n, :],
-                                                           mean=means[k, :],
-                                                           cov=covariances[k])
+                try:
+                    probabilities[n,k] = multivariate_normal.pdf(X[n, :],
+                                                               mean=means[k, :],
+                                                               cov=covariances[k])
+                except:
+                    out = np.repeat(np.nan, 13)
+                    return out
+
+
         likelihood_old = likelihood_
         likelihood_ = compute_likelihood(gammas, pis, xi, A, probabilities)
 
@@ -378,7 +404,7 @@ class HMM_GraphicalLasso(GraphicalLasso):
                      self.mode, self.verbose, self.warm_restart, self.tol)
                     for i in range(self.repetitions))
 
-        best_repetition = np.argmax([o[-1] for o in out])
+        best_repetition = np.nanargmax([o[-1] for o in out])
         self.all_results = out
         self.likelihood_ = out[best_repetition][-1]
         self.precisions_ = out[best_repetition][0]
@@ -421,15 +447,18 @@ class HMM_GraphicalLasso(GraphicalLasso):
                                   self.covariances_[state].diagonal()),
                               prob_sample=prob,
                               cov=self.covariances_[state],
-                              prec = self.precisions_[state])
+                              prec = self.precisions_[state],
+                              state = state
+                              )
             else:
                 prediction = dict(pred=sample,
                               means=self.means_[state],
                               stds=np.sqrt(
                                   self.covariances_[state].diagonal()),
                               cov = self.covariances_[state],
-                              prec = self.precisions_[state])
-
+                              prec = self.precisions_[state],
+                              state = state
+                              )
 
         elif method == 'hassan':
             pXn = np.sum(self.probabilities_ * self.gammas_, axis=1)
@@ -449,14 +478,18 @@ class HMM_GraphicalLasso(GraphicalLasso):
                                   self.covariances_[state].diagonal()),
                               cov=self.covariances_[state],
                               prob_sample=prob,
-                              prec = self.precisions_[state])
+                              prec = self.precisions_[state],
+                              state = state
+                              )
             else:
                 prediction = dict(pred=sample,
                               means=self.means_[state],
                               stds=np.sqrt(
                                   self.covariances_[state].diagonal()),
                               cov = self.covariances_[state],
-                              prec = self.precisions_[state])
+                              prec = self.precisions_[state],
+                              state = state
+                              )
 
         elif method == 'integral':
             D, K = self.means_.shape

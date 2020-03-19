@@ -12,7 +12,9 @@ from itertools import combinations
 import matplotlib.pyplot as plt
 import seaborn as sns
 import matplotlib.patches as mpatches
-
+import randomcolor
+from scipy.integrate import quad
+import scipy.stats
 
 def alpha_heuristic(emp_cov, n_samples, gamma=0.1):
     if n_samples < 3:
@@ -121,7 +123,7 @@ def probability_next_point(means,
     return prob
 
 
-def cross_validation(estimator, X, params=None, mode=None, n_repetitions=10):
+def cross_validation(estimator, X, params=None, n_repetitions=10):
     """
     params: dict, optional default None.
     The parameters to try, keys of the dictionaries are 'alpha' and 'n_clusters'.
@@ -147,10 +149,10 @@ def cross_validation(estimator, X, params=None, mode=None, n_repetitions=10):
     """
 
     if params is None:
-        alphas = np.logspace(-1, 1, 10)
+        alphas = np.linspace(1, 20, 10)
         n_clusters = np.arange(2, 12)
     else:
-        alphas = params.get('alpha', np.logspace(-3, 3, 10))
+        alphas = params.get('alpha', np.linspace(1, 20, 10))
         n_clusters = params.get('n_clusters', np.arange(2, 12))
 
     N, D = X.shape
@@ -190,20 +192,149 @@ def cross_validation(estimator, X, params=None, mode=None, n_repetitions=10):
                 'estimators': estimators
             }
 
-    scores = []
-    params = []
+    all_alpha = []
+    all_k = []
     for k, v in results.items():
-        if mode is None:
-            s = v['mean_bic'] + v['dispersion_coefficient']
-            results[k]['combined_score'] = s
-            scores.append(s)
-        elif mode == 'bic':
-            scores.append(results[k]['mean_bic'])
-        elif mode == 'stability':
-            scores.append(results[k]['dispersion_coefficient'])
-        params.append(k)
-    best_params = params[np.argmin(scores)]
+        all_alpha.append(k[0])
+        all_k.append(k[1])
+    alpha_uni = list(set(all_alpha))
+    k_uni = list(set(all_k))
+
+    scores_k = []
+    params_k = []
+
+    for k in k_uni:
+
+        scores_al = []
+        params_al = []
+
+        for al in alpha_uni:
+            scores_al.append(results[(al,k)]['dispersion_coefficient'])
+            params_al.append((al,k))
+        scores_k.append(results[params_al[np.nanargmin(scores_al)]]['mean_bic'])
+        params_k.append(params_al[np.nanargmin(scores_al)])
+
+    best_params = params_k[np.nanargmin(scores_k)]
+
     return best_params, results
+
+
+
+def cross_validation_higher_order(estimator, X, params=None, n_repetitions=10):
+    """
+    params: dict, optional default None.
+    The parameters to try, keys of the dictionaries are 'alpha' and 'n_clusters'.
+    If no interval is provided default values will be cross-validate. In
+    particular: alpha = np.logspace(-3,3, 10) and n_clusters=np.arange(2, 12)
+    Alpha could also be passed as 'auto' in which case it is automatically
+    computed with an heuristic.
+
+    mode: string, optional default=None
+    Options are:
+    - 'bic' for model selection based on Bayesian Information Criterion.
+    - 'stability' for model selection based on stability of the states detection
+    If None both criteria are used.
+
+    resampling_size= int or float, optional default=0.8
+    The size of the subset obtained through Monte Carlo subsampling. If a float
+    is provided it is used as the percentage of the total data to subsample. If
+    an int is provided that amount of samples is taken each time.
+
+    n_repetitions: int, optional default=10
+    Number of times we repeate the procedure to compute mean bic or stability
+    scores.
+    """
+
+    if params is None:
+        alphas = np.linspace(1, 20, 10)
+        n_clusters = np.arange(2, 12)
+        n_memory = np.arange(1, 4)
+    else:
+        alphas = params.get('alpha', np.linspace(1, 20, 10))
+        n_clusters = params.get('n_clusters', np.arange(2, 12))
+        n_memory = params.get('N_memory_trans', np.arange(1, 4))
+
+    N, D = X.shape
+    results = {}
+    for a in tqdm(alphas):
+        for c in tqdm(n_clusters):
+            for m in tqdm(n_memory):
+                est = clone(estimator)
+                est.alpha = a
+                est.n_clusters = c
+                est.N_memory_trans = m
+                bics = []
+                estimators = []
+                connectivity_matrix = np.zeros((N, N))
+                for i in range(n_repetitions):
+                    est.fit(X)
+                    dof = np.sum([np.count_nonzero(p) for p in est.precisions_])
+                    bics.append(
+                        np.log(N) * (c**m*(c+D)-1 + dof) -
+                        2 * est.likelihood_)
+                    C = np.zeros_like(connectivity_matrix)
+                    for r, i in enumerate(est.labels_):
+                        C[r, i] = 1
+                    connectivity_matrix += C.dot(C.T)
+                    estimators.append(est)
+                connectivity_matrix /= n_repetitions
+
+                non_diag = (np.ones(shape=(N, N)) - np.identity(N)).astype(bool)
+                ravelled = connectivity_matrix[np.where(non_diag)]
+                eta = np.var(ravelled)
+                eta /= ((N / c**m - 1) / (N - 1) - ((N / c**m - 1) / (N - 1))**2) # da controllare questa formula in questo caso
+
+                results[(a, c,m)] = {
+                    'bics': bics,
+                    'mean_bic': np.mean(bics),
+                    'std_bic': np.std(bics),
+                    'connectivity_matrix': connectivity_matrix,
+                    'dispersion_coefficient': eta,
+                    'estimators': estimators
+                }
+
+    all_alpha = []
+    all_k = []
+    all_n = []
+    for k, v in results.items():
+        all_alpha.append(k[0])
+        all_k.append(k[1])
+        all_n.append(k[2])
+    alpha_uni = list(set(all_alpha))
+    k_uni = list(set(all_k))
+    nu_uni = list(set(all_n))
+
+    scores_nu = []
+    params_nu = []
+
+    for nu in nu_uni:
+
+        scores_k = []
+        params_k = []
+
+        for k in k_uni:
+
+            scores_al = []
+            params_al = []
+
+            for al in alpha_uni:
+                scores_al.append(results[(al,k,nu)]['dispersion_coefficient'])
+                params_al.append((al,k,nu))
+
+            scores_k.append(results[params_al[np.nanargmin(scores_al)]]['mean_bic'])
+            params_k.append(params_al[np.nanargmin(scores_al)])
+
+        scores_nu.append(results[params_k[np.nanargmin(scores_k)]]['mean_bic'])
+        params_nu.append(params_k[np.nanargmin(scores_k)])
+
+    best_params = params_nu[np.nanargmin(scores_nu)]
+
+    return best_params, results
+
+
+
+
+
 
 
 def results_recap(labels_true,
@@ -247,28 +378,18 @@ def results_recap(labels_true,
                        str(c[couple]) + ', MCC: ' + str(mcc[couple]) +
                        ', F1_score: ' + str(f1_score[couple]))
 
+
+
         results['weighted_mean_mcc [-1, 1]'] = np.sum(mcc * c) / np.sum(c),
-        results['max_cluster_mean_mcc[-1,1]'] = np.sum(
-            [mcc[c] for c in couples]) / len(thetas_pred),
+        results['max_cluster_mean_mcc[-1,1]'] = np.sum([mcc[c] for c in couples]) / len(thetas_pred),
         results['weighted_mean_f1 [0, 1]'] = np.sum(f1_score * c) / np.sum(c),
-        results['max_cluster_mean_f1[0,1]'] = np.sum(
-            [f1_score[c] for c in couples]) / len(thetas_pred),
+        results['max_cluster_mean_f1[0,1]'] = np.sum([f1_score[c] for c in couples]) / len(thetas_pred),
         results['probabilities_clusters'] = c,
         results['max_probabilities_couples'] = res
     return results
 
 
-def prepare_data_to_predict(X, p):
-    N, d = X.shape
-    if N <= p:
-        raise ValueError('Not enough observation for ' + str(p) + 'memory')
-    dataX = np.zeros((np.size(X, axis=0) - p, p * d))
-    dataY = np.zeros((np.size(X, axis=0) - p, d))
-    for i in range(p, np.size(X, axis=0)):
-        temp = X[i - p:i, :]
-        dataX[i - p, :] = X[i - p:i, :].reshape((1, np.size(temp)))
-        dataY[i - p, :] = X[i, :]
-    return dataX, dataY
+
 
 def names(var_names,couple):
     if len(var_names) == 0:
@@ -423,4 +544,151 @@ def spread_pred_interpretation(df_pred,real, prec = None, cov = None,
     else:
         return df_pred, df_real,df_res, np.mean(tab_res),np.mean(tab_res,axis=0)
 
+
+def cov2corr(cov, return_std=False):
+    cov = np.asanyarray(cov)
+    std_ = np.sqrt(np.diag(cov))
+    corr = cov / np.outer(std_, std_)
+    if return_std:
+        return corr, std_
+    else:
+        return corr
+
+
+def corr_plot(corrs,sizeplotx=20,sizeploty=10, labels=None, covcorr=False, numbers=True):
+    if covcorr:
+        correlations = []
+        for k in range(len(corrs)):
+            correlations.append(cov2corr(corrs[k]))
+        corrs = correlations
+
+    N_plots = len(corrs)
+
+    N_per_rows = 2
+    N_rows = int(np.ceil(N_plots / N_per_rows))
+    f, axes = plt.subplots(N_rows, N_per_rows, figsize=(sizeplotx, sizeploty))
+
+    count = 0
+    if labels is None:
+        for i in range(N_rows):
+            for j in range(N_per_rows):
+                if N_rows == 1:
+                    sns.heatmap(corrs[count],
+                                annot=numbers,
+                                ax=axes[j])
+                    axes[j].set_title('Correlation matrix for cluster '+str(count))
+                else:
+                    sns.heatmap(corrs[count], annot=numbers,
+                                ax=axes[i, j])
+                    axes[i, j].set_title('Correlation matrix for cluster ' + str(count))
+
+                count += 1
+                if count == N_plots:
+                    break
+
+    else:
+        for i in range(N_rows):
+            for j in range(N_per_rows):
+                if N_rows == 1:
+                    sns.heatmap(corrs[count],
+                                annot=numbers,
+                                xticklabels=labels,
+                                yticklabels=labels,
+                                ax=axes[j])
+                    axes[j].set_title('Correlation matrix for cluster ' + str(count))
+                else:
+                    sns.heatmap(corrs[count], annot=numbers,
+                                xticklabels=labels,
+                                yticklabels=labels,
+                                ax=axes[i, j])
+                    axes[i, j].set_title('Correlation matrix for cluster ' + str(count))
+
+                count += 1
+                if count == N_plots:
+                    break
+    plt.show()
+
+
+def plot_results_cluster(Data, clusters, Dates = None, ts_labels = None):
+
+
+    rand_color = randomcolor.RandomColor()
+    fig, ax = plt.subplots(figsize=(15, 10))
+
+    # Draw data
+
+    for i in range(Data.shape[1]):
+        if Dates is None:
+
+            if ts_labels is None:
+                ax.plot(Data[1:, i], label='ts ' + str(i))
+            else:
+                ax.plot(Data[1:, i], label=ts_labels[i])
+
+        else:
+
+            if ts_labels is None:
+                ax.plot(Dates, Data[1:, i], label='ts '+str(i))
+            else:
+                ax.plot(Dates, Data[1:, i], label=ts_labels[i])
+
+    # Draw shaded regions to highlight clusters
+    N_clusters = np.size(np.unique(clusters))
+
+    for k in range(N_clusters):
+        if Dates is None:
+            ax.fill_between(np.arange(np.size(Data[1:, :],axis=0)),0, 1, where=clusters == k,
+                            color=rand_color.generate(), alpha=0.5, transform=ax.get_xaxis_transform(),
+                            label='cluster ' + str(k))
+        else:
+            ax.fill_between(Dates, 0, 1, where=clusters== k,
+                            color=rand_color.generate(), alpha=0.5, transform=ax.get_xaxis_transform(),
+                            label='cluster ' + str(k))
+
+    plt.legend(ncol=3)
+    plt.show()
+
+
+
+
+def cluster_returns_recap(means, covariances, labels=None):
+    N_ts = np.size(means[0])
+    mean_std = []
+    for k in range(len(covariances)):
+
+        temp = np.sqrt(covariances[k].diagonal())
+        for n in range(N_ts):
+            mean_std_row = []
+            # cluster
+            mean_std_row.append(k)
+            # time series
+            if labels is None:
+                mean_std_row.append('ts '+str(n))
+            else:
+                mean_std_row.append(labels[n])
+            # mean
+            mean_std_row.append(means[k][n])
+            # std
+            mean_std_row.append(temp[n])
+            # prob positive trend
+            if means[k][n] + 3*temp[n]< 0:
+                mean_std_row.append(0)
+            else:
+                f = lambda x: scipy.stats.norm.pdf(x, means[k][n], temp[n])
+                mean_std_row.append(quad(f, 0, means[k][n] + 3*temp[n])[0]*100)
+
+            # prob negative trend
+            if means[k][n] - 3*temp[n]> 0:
+                mean_std_row.append(0)
+            else:
+                f = lambda x: scipy.stats.norm.pdf(x, means[k][n], temp[n])
+                mean_std_row.append(quad(f, means[k][n] - 3*temp[n],0)[0]*100)
+
+            mean_std.append(mean_std_row)
+
+
+
+    df_recap = pd.DataFrame(mean_std, columns=['Cluster','TS', 'mean', 'std', 'Prob positive return %', 'Prob negative return %' ])
+
+    return df_recap
 

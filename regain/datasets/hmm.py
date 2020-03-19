@@ -1,12 +1,11 @@
 import operator as op
 from functools import reduce
-
 import numpy as np
-from regain.datasets.gaussian import make_starting
+from regain.datasets.gaussian import make_starting,make_starting_mine
 from scipy import linalg
 from scipy.stats import bernoulli
 from sklearn.datasets import make_spd_matrix
-
+from regain.hmm.utils import cov2corr
 
 def isPSD(A, tol=1e-8):
     E = np.linalg.eigvalsh(A)
@@ -82,7 +81,7 @@ def generate_hmm(n_samples=100,
     Possible values are complementary to generate complementary precision matrices,
     regain to use the funcion make_starting of the library, sklearn to use the function make_spd_matrix
     """
-    precisions, covariances, means = [], [], []
+    precisions, covariances, means, correlations = [], [], [], []
     if mode_precisions == 'complementary':
         covariances, precisions = generate_complementary_precisions_matrix(
             n_dim_obs, n_states ** order_hmm)
@@ -90,12 +89,19 @@ def generate_hmm(n_samples=100,
         for k in range(n_states ** order_hmm):
             if mode_precisions == 'regain':
                 precisions.append(
-                    make_starting(n_dim_obs=n_dim_obs, n_dim_lat=0,
-                                  **kwargs)[0])
+                    make_starting(n_dim_obs=n_dim_obs, n_dim_lat=0,**kwargs)[0])
                 covariances.append(linalg.pinv(precisions[k]))
+                correlations.append(cov2corr(covariances[k]))
+
+            elif mode_precisions == 'regain_random':
+                precisions.append(
+                    make_starting_mine(n_dim_obs=n_dim_obs, n_dim_lat=0,par = 0.9,**kwargs)[0])
+                covariances.append(linalg.pinv(precisions[k]))
+                correlations.append(cov2corr(covariances[k]))
             else:
                 covariances.append(make_spd_matrix(n_dim_obs))
                 precisions.append(linalg.pinv(covariances[k]))
+                correlations.append(cov2corr(covariances[k]))
 
     if mode_mean == 'Normal':
         means = [
@@ -183,6 +189,7 @@ def generate_hmm(n_samples=100,
     res = dict(data=data,
                thetas=precisions,
                covariances=covariances,
+               correlations = correlations,
                means=means,
                transition_state=A,
                cumulatives=variations_sum,

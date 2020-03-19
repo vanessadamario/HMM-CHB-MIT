@@ -134,7 +134,12 @@ def hhmm_graphical_lasso(X,
     probabilities = np.zeros((N, int(K**nu)))
     for n in range(N):
         for k in range(int(K**nu)):
-            probabilities[n, k] = multivariate_normal.pdf(X[n, :], mean=means[k, :], cov=covariances[k])
+            try:
+                probabilities[n, k] = multivariate_normal.pdf(X[n, :], mean=means[k, :], cov=covariances[k])
+            except:
+                out = np.repeat(np.nan, 13)
+                return out
+
     likelihood_ = -np.inf
     thetas = []
     for iter_ in range(max_iter):
@@ -200,18 +205,36 @@ def hhmm_graphical_lasso(X,
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore")
                 if warm_restart and iter_ > 0:
-                    thetas.append(
+
+                    try:
+                        thetas.append(
                         graphical_lasso(S_k,
                                         alpha=lambdas[j],
                                         init=thetas_old[j])[0])
+                    except:
+                        out = np.repeat(np.nan,13)
+                        return out
+
                 else:
-                    thetas.append(graphical_lasso(S_k, alpha=lambdas[j])[0])
+
+                    try:
+                        thetas.append(graphical_lasso(S_k, alpha=lambdas[j])[0])
+                    except:
+                        out = np.repeat(np.nan,13)
+                        return out
+
 
         covariances = [np.linalg.pinv(t) for t in thetas]
+        #print('iter',iter_,'cov',covariances)
         probabilities = np.zeros((N, int(K**nu)))
         for n in range(N):
             for k in range(int(K**nu)):
-                probabilities[n, k] = multivariate_normal.pdf(X[n, :], mean=means[k, :], cov=covariances[k])
+                try:
+                    probabilities[n, k] = multivariate_normal.pdf(X[n, :], mean=means[k, :], cov=covariances[k])
+                except:
+                    out = np.repeat(np.nan, 13)
+                    return out
+
         # print(A)
         likelihood_old = likelihood_
         likelihood_ = compute_likelihood(gammas, pis, xi, A, probabilities)
@@ -322,8 +345,9 @@ class HHMM_GraphicalLasso(HMM_GraphicalLasso):
         def _to_parallelize(X, K, init_params, alpha, max_iter, mode, verbose,
                             warm_restart, tol,nu,N_memory_trans,N_memory_emis):
             means, covariances, A, pis = _initialization(X, K, init_params, alpha, nu)
-            thetas, means, covariances, A, pis, gammas, probabilities, \
-            alphas, betas, xi, emp_cov,lambdas, likelihood_ = hhmm_graphical_lasso(
+
+            thetas, means, covariances, A, pis, gammas, probabilities, alphas,\
+            betas, xi, emp_cov, lambdas,likelihood_ = hhmm_graphical_lasso(
                                                                           X,
                                                                           A,
                                                                           pis,
@@ -338,8 +362,8 @@ class HHMM_GraphicalLasso(HMM_GraphicalLasso):
                                                                           r=N_memory_trans,
                                                                           m=N_memory_emis
                                                                           )
-            return thetas, means, A, pis, gammas, probabilities, alphas, covariances,\
-                   betas, xi,emp_cov,lambdas,likelihood_
+            return thetas, means, covariances, A, pis, gammas, probabilities,\
+                   alphas, betas, xi, emp_cov, lambdas,likelihood_
 
         if self.repetitions == 1:
             out = [_to_parallelize(X, K, self.init_params, self.alpha, self.max_iter,
@@ -354,7 +378,7 @@ class HHMM_GraphicalLasso(HMM_GraphicalLasso):
                      self.mode, self.verbose, self.warm_restart, self.tol,self.nu,self.N_memory_trans,self.N_memory_emis)
                     for i in range(self.repetitions))
 
-        best_repetition = np.argmax([o[-1] for o in out])
+        best_repetition = np.nanargmax([o[-1] for o in out])
         self.all_results = out
         self.likelihood_ = out[best_repetition][-1]
         self.precisions_ = out[best_repetition][0]

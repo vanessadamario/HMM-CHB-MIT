@@ -748,3 +748,72 @@ def make_ma_xue_zou_rand_k(
     N = 5 * po
     print("Note that, with this method, the n_samples should be %d" % N)
     return [K_O] * T, [K_O_tilde] * T, [L] * T
+
+
+def random_seq(n, fixed_sum):
+    prob = np.zeros(n)
+
+    for i in range(n - 1):
+        prob[i] = np.random.choice([1, -1]) * np.random.uniform(0, fixed_sum, 1)
+        fixed_sum -= abs(prob[i])
+
+    prob[n - 1] = fixed_sum
+
+    return prob
+
+
+def check_row_sum(theta, par, i, indices):
+    par_min = []
+    par_min.append(par - (np.sum(abs(theta[i, :])) - theta[i, i]))
+    for j in indices:
+        par_min.append(par - (np.sum(abs(theta[j, :])) - theta[j, j]))
+    return min(par_min)
+
+
+def make_starting_mine(n_dim_obs=100, n_dim_lat=10, degree=2, par=0.5, normalize=False):
+    """Generate starting theta, theta_observed, L, K_HO."""
+    L, K_HO = make_ell(n_dim_obs, n_dim_lat)
+
+    if normalize:
+        theta = np.zeros((n_dim_obs, n_dim_obs))
+        for i in range(n_dim_obs):
+            possible_idx = list(
+                set(range(n_dim_obs)) - (
+                        set(np.nonzero(theta[i, :])[0]) | set(
+                    np.where(np.count_nonzero(theta, axis=1) > degree)[0]))
+            )
+            if not possible_idx:
+                continue
+            n_choice = degree - (np.count_nonzero(theta[i, :]) - 1)
+            if n_choice > 0:
+                indices = np.random.choice(possible_idx, n_choice)
+            theta[i, indices] = theta[indices, i] = 1. / degree
+
+        theta.flat[::n_dim_obs + 1] = np.sum(theta, axis=1) + 0.002
+
+    else:
+
+        degree = np.random.choice(np.arange(1,min(4,np.ceil(n_dim_obs/4)+1)), 1)[0]
+        theta = np.eye(n_dim_obs)
+        for i in range(n_dim_obs):
+            possible_idx = list(
+                set(range(n_dim_obs)) - (
+                        set(np.nonzero(theta[i, :])[0]) | set(
+                    np.where(np.count_nonzero(theta, axis=1) > degree)[0]))
+            )
+            if not possible_idx:
+                continue
+            n_choice = degree - (np.count_nonzero(theta[i, :]) - 1)
+            if n_choice > 0:
+                indices = np.unique(np.random.choice(possible_idx, int(n_choice)))
+                # random prob keeping the sum of each row off-diagonal elements fixed to par
+                par_new = check_row_sum(theta, par, i, indices)
+                prob = random_seq(np.size(indices), par_new)
+
+                for j in range(np.size(indices)):
+                    theta[i, indices[j]] = theta[indices[j], i] = prob[j]
+
+    assert (is_pos_def(theta))
+    theta_observed = theta - L
+    assert (is_pos_def(theta_observed))
+    return theta, theta_observed, L, K_HO

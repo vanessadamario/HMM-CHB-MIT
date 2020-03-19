@@ -49,3 +49,26 @@ def load_finance(condensed=True, sectors=False):
         filename = os.path.join(os.path.dirname(__file__),
                                 "finance/industries_sector.csv")
         sectors = pd.read_csv(filename, index_col=0)
+        
+        
+def load_commodities_data(type_data = 1):
+    
+    filename = os.path.join(os.path.dirname(__file__),
+                                "Commodities/Dataset"+str(type_data)+".pickle")
+    
+    with open(filename ,'rb') as f:
+            [Dataset] = pkl.load(f)
+            
+    return Dataset
+
+
+def load_ETF_data(file = 'ETF_data'):
+    filename = os.path.join(os.path.dirname(__file__),
+                            "ETF/" + str(file) + ".pickle")
+
+    with open(filename, 'rb') as f:
+        [Dataset] = pkl.load(f)
+
+    return Dataset
+    
+    
