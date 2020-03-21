@@ -259,6 +259,12 @@ def cross_validation_higher_order(estimator, X, params=None, n_repetitions=10):
     for a in tqdm(alphas):
         for c in tqdm(n_clusters):
             for m in tqdm(n_memory):
+
+                if c>3 and m>1:
+                    break
+                elif m>3:
+                    break
+
                 est = clone(estimator)
                 est.alpha = a
                 est.n_clusters = c
@@ -555,7 +561,7 @@ def cov2corr(cov, return_std=False):
         return corr
 
 
-def corr_plot(corrs,sizeplotx=20,sizeploty=10, labels=None, covcorr=False, numbers=True):
+def corr_plot(corrs,sizeplotx=20,sizeploty=10,N_st = 2,mem = 2,HHMM = False, labels=None, covcorr=False, numbers=True):
     if covcorr:
         correlations = []
         for k in range(len(corrs)):
@@ -569,6 +575,10 @@ def corr_plot(corrs,sizeplotx=20,sizeploty=10, labels=None, covcorr=False, numbe
     f, axes = plt.subplots(N_rows, N_per_rows, figsize=(sizeplotx, sizeploty))
 
     count = 0
+
+    if HHMM:
+        lab = cluster_interpretation(N_st, mem)
+
     if labels is None:
         for i in range(N_rows):
             for j in range(N_per_rows):
@@ -576,11 +586,20 @@ def corr_plot(corrs,sizeplotx=20,sizeploty=10, labels=None, covcorr=False, numbe
                     sns.heatmap(corrs[count],
                                 annot=numbers,
                                 ax=axes[j])
-                    axes[j].set_title('Correlation matrix for cluster '+str(count))
+                    if HHMM:
+                        axes[j].set_title('Correlation matrix for state ' + str(lab[count]))
+                    else:
+                        axes[j].set_title('Correlation matrix for cluster '+str(count))
                 else:
                     sns.heatmap(corrs[count], annot=numbers,
                                 ax=axes[i, j])
-                    axes[i, j].set_title('Correlation matrix for cluster ' + str(count))
+
+                    if HHMM:
+                        axes[j,j].set_title('Correlation matrix for state ' + str(lab[count]))
+
+                    else:
+                        axes[i, j].set_title('Correlation matrix for cluster ' + str(count))
+
 
                 count += 1
                 if count == N_plots:
@@ -595,21 +614,52 @@ def corr_plot(corrs,sizeplotx=20,sizeploty=10, labels=None, covcorr=False, numbe
                                 xticklabels=labels,
                                 yticklabels=labels,
                                 ax=axes[j])
-                    axes[j].set_title('Correlation matrix for cluster ' + str(count))
+                    if HHMM:
+                        axes[j].set_title('Correlation matrix for state ' + str(lab[count]))
+                    else:
+                        axes[j].set_title('Correlation matrix for cluster '+str(count))
                 else:
                     sns.heatmap(corrs[count], annot=numbers,
                                 xticklabels=labels,
                                 yticklabels=labels,
                                 ax=axes[i, j])
-                    axes[i, j].set_title('Correlation matrix for cluster ' + str(count))
+                    if HHMM:
+                        axes[j, j].set_title('Correlation matrix for state ' + str(lab[count]))
+                        print(lab[count])
+                    else:
+                        axes[i, j].set_title('Correlation matrix for cluster ' + str(count))
 
                 count += 1
                 if count == N_plots:
                     break
     plt.show()
 
+def cluster_interpretation(N_states,Mem):
 
-def plot_results_cluster(Data, clusters, Dates = None, ts_labels = None):
+    stat = np.zeros((N_states ** Mem, Mem))
+
+    for nu in range(Mem):
+        seq = []
+        for k in range(N_states):
+            seq.extend(np.repeat(int(k), int(N_states ** nu)))
+        stat[:, nu] = np.tile(seq, int(N_states ** (Mem - (nu + 1))))
+
+    inter = []
+    for i in range(N_states ** Mem):
+        rev_temp = list(reversed(stat[i, :]))
+        temp = str(int(rev_temp[0])) + '|'
+        for ap in range(len(rev_temp)):
+            if ap == 0:
+                temp += str(int(rev_temp[ap]))
+            else:
+                temp += ',' + str(int(rev_temp[ap]))
+
+        inter.append(temp)
+
+    return inter
+
+
+def plot_results_cluster(Data, clusters,N_st = 2,mem = 2,HHMM = False, Dates = None, ts_labels = None):
 
 
     rand_color = randomcolor.RandomColor()
@@ -633,17 +683,33 @@ def plot_results_cluster(Data, clusters, Dates = None, ts_labels = None):
                 ax.plot(Dates, Data[1:, i], label=ts_labels[i])
 
     # Draw shaded regions to highlight clusters
-    N_clusters = np.size(np.unique(clusters))
+    if HHMM:
+        lab = cluster_interpretation(N_st, mem)
+        N_clusters = N_st**mem
+    else:
+        N_clusters = np.size(np.unique(clusters))
 
     for k in range(N_clusters):
         if Dates is None:
-            ax.fill_between(np.arange(np.size(Data[1:, :],axis=0)),0, 1, where=clusters == k,
+            if HHMM:
+                ax.fill_between(np.arange(np.size(Data[1:, :], axis=0)), 0, 1, where=clusters == k,
+                                color=rand_color.generate(), alpha=0.5, transform=ax.get_xaxis_transform(),
+                                label='state ' + str(lab[k]))
+
+            else:
+                ax.fill_between(np.arange(np.size(Data[1:, :],axis=0)),0, 1, where=clusters == k,
                             color=rand_color.generate(), alpha=0.5, transform=ax.get_xaxis_transform(),
                             label='cluster ' + str(k))
         else:
-            ax.fill_between(Dates, 0, 1, where=clusters== k,
-                            color=rand_color.generate(), alpha=0.5, transform=ax.get_xaxis_transform(),
-                            label='cluster ' + str(k))
+            if HHMM:
+                ax.fill_between(Dates, 0, 1, where=clusters == k,
+                                color=rand_color.generate(), alpha=0.5, transform=ax.get_xaxis_transform(),
+                                label='state ' + str(lab[k]))
+            else:
+                ax.fill_between(Dates, 0, 1, where=clusters == k,
+                                color=rand_color.generate(), alpha=0.5, transform=ax.get_xaxis_transform(),
+                                label='cluster ' + str(k))
+
 
     plt.legend(ncol=3)
     plt.show()
@@ -651,7 +717,9 @@ def plot_results_cluster(Data, clusters, Dates = None, ts_labels = None):
 
 
 
-def cluster_returns_recap(means, covariances, labels=None):
+def cluster_returns_recap(means, covariances, labels=None,N_st = 2,mem = 2,HHMM = False):
+    if HHMM:
+        lab = cluster_interpretation(N_st, mem)
     N_ts = np.size(means[0])
     mean_std = []
     for k in range(len(covariances)):
@@ -660,7 +728,7 @@ def cluster_returns_recap(means, covariances, labels=None):
         for n in range(N_ts):
             mean_std_row = []
             # cluster
-            mean_std_row.append(k)
+            mean_std_row.append(lab[k])
             # time series
             if labels is None:
                 mean_std_row.append('ts '+str(n))
