@@ -15,6 +15,43 @@ import matplotlib.patches as mpatches
 import randomcolor
 from scipy.integrate import quad
 import scipy.stats
+import math
+
+
+def squared_l2_norm(x):
+    return np.linalg.norm(x)**2
+
+def Norm_inter (X,a=0,b=1):
+
+    if X.ndim == 1:
+        N = X.shape
+        d = 1
+    else:
+        N,d = X.shape
+
+    if d ==1:
+        return (b-a)*(X-np.min(X))/(np.max(X)-np.min(X))+a
+    else:
+        X_norm = np.zeros((N,d))
+
+        for j in range(d):
+            temp = X[:,j]
+            X_norm[:,j] = (b-a)*(temp-np.min(temp))/(np.max(temp)-np.min(temp))+a
+
+        return X_norm
+
+def Scaled_Mult_Epanechnikov_ker(u,utmeno1,d,h):
+
+
+    cd = math.pi**(d/2)/math.gamma(d/2 + 1)
+    x = (u-utmeno1)/h
+
+
+    return (d+2)/(2*cd)*np.max([0,1-squared_l2_norm(x)])/h
+
+
+
+
 
 def alpha_heuristic(emp_cov, n_samples, gamma=0.1):
     if n_samples < 3:

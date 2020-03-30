@@ -70,9 +70,21 @@ def PO_minimum_tangency(mu, cov,rf):
 
     return t,mu_p,var_port
 
+def leverage_weights(mean, cov):
+
+    variances_pred = cov.diagonal()
+    max_var_pred = np.max(variances_pred)
+    lev = np.reciprocal(variances_pred / max_var_pred)
+    mean_lev = lev * mean
+
+    print(lev,mean,mean_lev)
+
+    return mean_lev
+
 
 def PO_with_HMM_GMM(returns, Prices, alpha_list, clus_list, N_test=100, Wealth=1e5, N_past_days=50,
-                     meth='viterbi', OP_method = 'Min_Var',rf = 0.005, mu_p= 0.05,N_max_mem = 1000, N_CV = 10):
+                     meth='viterbi', OP_method = 'Min_Var',rf = 0.005, mu_p= 0.05,N_max_mem = 1000, N_CV = 10,
+                    leverage=True):
     N_obs = np.size(returns, axis=0)
     N_ts = np.size(returns, axis=1)
 
@@ -116,10 +128,15 @@ def PO_with_HMM_GMM(returns, Prices, alpha_list, clus_list, N_test=100, Wealth=1
 
         hmm_gmm.fit(X_train)
         state_adj = False
+        pred_weights = False
+        today_weights = False
+        Cv_adj = False
 
         if i == 0 or np.mod(i,N_CV)==0:
             label_mem = hmm_gmm.labels_
             prec_mem = hmm_gmm.precisions_
+            Cv_adj = True
+
         else:
             state_adj = True
             clus_comp= results_recap(label_mem,
@@ -137,8 +154,6 @@ def PO_with_HMM_GMM(returns, Prices, alpha_list, clus_list, N_test=100, Wealth=1
 
         # Using HMM-GMM prediction
 
-        pred_weights = False
-
         pred = hmm_gmm.predict(X_train, method=meth)
 
 
@@ -149,7 +164,7 @@ def PO_with_HMM_GMM(returns, Prices, alpha_list, clus_list, N_test=100, Wealth=1
         else:
             cluster_pred = pred['state']
 
-        if cluster_mem_pred != cluster_pred:
+        if Cv_adj or cluster_mem_pred != cluster_pred:
 
             print('Pred changed cluster')
             cluster_mem_pred = cluster_pred
@@ -167,7 +182,7 @@ def PO_with_HMM_GMM(returns, Prices, alpha_list, clus_list, N_test=100, Wealth=1
         cov_today = hmm_gmm.covariances_[hmm_gmm.labels_[-1]]
         mean_today = hmm_gmm.means_[hmm_gmm.labels_[-1]]
 
-        if cluster_mem_today != cluster_today:
+        if Cv_adj or cluster_mem_today != cluster_today:
 
             print('Today changed cluster')
             cluster_mem_today = cluster_today
@@ -177,6 +192,13 @@ def PO_with_HMM_GMM(returns, Prices, alpha_list, clus_list, N_test=100, Wealth=1
 
         means_today_emp = np.mean(X_train_emp, axis=0)
         cov_today_emp = empirical_covariance(X_train_emp - means_today_emp, assume_centered=True)
+
+        if leverage:
+            mean_pred = leverage_weights(mean_pred, cov_pred)
+            mean_today = leverage_weights(mean_today, cov_today)
+            means_today_emp = leverage_weights(means_today_emp, cov_today_emp)
+
+
 
         # Portfolio optimization
 
