@@ -44,6 +44,7 @@ from sklearn.cluster import KMeans
 from sklearn.covariance import empirical_covariance
 from sklearn.mixture import GaussianMixture
 from sklearn.utils.validation import check_array
+from regain.datasets.hmm import generate_hmm
 
 
 def TransMatrixInit(method,K, nu):
@@ -68,8 +69,8 @@ def TransMatrixInit(method,K, nu):
     return A
 
 def ImSet(K,i,nu,m):
-    lower = np.floor(i / (K ** (nu - m)) * K ** (nu - m))
-    upper = np.floor(i / (K ** (nu - m)) + 1) * K ** (nu - m)
+    lower = np.floor(i / (K ** (nu - m))) * K ** (nu - m)
+    upper = (np.floor(i / (K ** (nu - m))) + 1) * K ** (nu - m)
     return list(range(int(lower), int(upper)))
 
 

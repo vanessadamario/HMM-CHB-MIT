@@ -73,8 +73,9 @@ def PO_minimum_tangency(mu, cov,rf):
 def leverage_weights(mean, cov):
 
     variances_pred = cov.diagonal()
-    max_var_pred = np.max(variances_pred)
-    lev = np.reciprocal(variances_pred / max_var_pred)
+    std_pred = np.sqrt(variances_pred)
+    max_std_pred = np.max(std_pred)
+    lev = np.reciprocal(std_pred / max_std_pred)
     mean_lev = lev * mean
 
     print(lev,mean,mean_lev)
