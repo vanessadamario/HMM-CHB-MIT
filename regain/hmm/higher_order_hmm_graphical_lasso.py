@@ -133,13 +133,12 @@ def hhmm_graphical_lasso(X,
     K = int(pis.shape[0]**(1/nu))
     N, d = X.shape
     probabilities = np.zeros((N, int(K**nu)))
-    for n in range(N):
-        for k in range(int(K**nu)):
-            try:
-                probabilities[n, k] = multivariate_normal.pdf(X[n, :], mean=means[k, :], cov=covariances[k])
-            except:
-                out = np.repeat(np.nan, 13)
-                return out
+    for k in range(int(K**nu)):
+        try:
+            probabilities[:, k] = multivariate_normal.pdf(X, mean=means[k, :], cov=covariances[k])
+        except:
+            out = np.repeat(np.nan, 13)  # Questo perche' dovrebbe succedere?
+            return out
 
     likelihood_ = -np.inf
     thetas = []
@@ -147,15 +146,12 @@ def hhmm_graphical_lasso(X,
         # E-step
         if mode == 'scaled':
             alphas, betas,cs = scaled_forward_backward(X, pis, probabilities, A)
-            gammas = alphas * betas
-            for n in range(np.size(gammas, axis=0)):
-                gammas[n, :] = gammas[n, :] / np.sum(alphas[n, :] * betas[n, :])
+            gammas = (alphas * betas)/np.diag(alphas.dot(betas.T))[:, np.newaxis]
             xi = np.zeros((N - 1, int(K**nu), int(K**nu)))
             for n in range(N - 1):
                 Normn = alphas[n, :].dot(A).dot(probabilities[n+1, :].T)
                 for k in range(int(K**nu)):
-                    for j in range(int(K**nu)):
-                        xi[n, k, j] = (gammas[n, k] * A[k, j] * probabilities[n + 1, j] * betas[n + 1, j]) / (
+                        xi[n, k, :] = (gammas[n, k] * A[k, :] * probabilities[n + 1, :] * betas[n + 1, :]) / (
                                     Normn * betas[n, k])
         else:
 
@@ -164,13 +160,10 @@ def hhmm_graphical_lasso(X,
 
             # transition probability
             xi = np.zeros((N - 1, int(K**nu), int(K**nu)))
-            gammas = np.zeros((N - 1, int(K**nu)))
             for n in range(N - 1):
                 for k in range(int(K**nu)):
-                    for j in range(int(K**nu)):
-                        xi[n, k, j] = (alphas[n, k] * A[k, j] * probabilities[n + 1, j] * betas[n + 1, j]) / p_x
-                    gammas[n, k] = np.sum(xi[n, k, :])
-
+                        xi[n, k, :] = (alphas[n, k] * A[k, :] * probabilities[n + 1, :] * betas[n + 1, :]) / p_x
+            gammas = np.sum(xi, axis=2)
             gammas = np.vstack((gammas, alphas[-1, :] * betas[-1, :] / np.sum(alphas[-1, :] * betas[-1, :])))
 
         # M-step
@@ -228,13 +221,8 @@ def hhmm_graphical_lasso(X,
         covariances = [np.linalg.pinv(t) for t in thetas]
         #print('iter',iter_,'cov',covariances)
         probabilities = np.zeros((N, int(K**nu)))
-        for n in range(N):
-            for k in range(int(K**nu)):
-                try:
-                    probabilities[n, k] = multivariate_normal.pdf(X[n, :], mean=means[k, :], cov=covariances[k])
-                except:
-                    out = np.repeat(np.nan, 13)
-                    return out
+        for k in range(int(K**nu)):
+            probabilities[:, k] = multivariate_normal.pdf(X, mean=means[k, :], cov=covariances[k])
 
         # print(A)
         likelihood_old = likelihood_
