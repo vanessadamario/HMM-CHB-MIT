@@ -85,7 +85,7 @@ def leverage_weights(mean, cov):
 
 def PO_with_HMM_GMM(returns, Prices, alpha_list, clus_list, N_test=100, Wealth=1e5, N_past_days=50,
                      meth='viterbi', OP_method = 'Min_Var',rf = 0.005, mu_p= 0.05,N_max_mem = 1000, N_CV = 10,
-                    leverage=True):
+                    leverage=False):
     N_obs = np.size(returns, axis=0)
     N_ts = np.size(returns, axis=1)
 

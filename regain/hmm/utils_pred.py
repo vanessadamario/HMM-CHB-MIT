@@ -9,6 +9,19 @@ import scipy.stats
 import pandas as pd
 import seaborn as sns
 from regain.utils import structure_error
+from tqdm import tqdm
+
+def prepare_data_to_predict(X, p):
+    N, d = X.shape
+    if N <= p:
+        raise ValueError('Not enough observation for ' + str(p) + 'memory')
+    dataX = np.zeros((np.size(X, axis=0) - p, p * d))
+    dataY = np.zeros((np.size(X, axis=0) - p, d))
+    for i in range(p, np.size(X, axis=0)):
+        temp = X[i - p:i, :]
+        dataX[i - p, :] = X[i - p:i, :].reshape((1, np.size(temp)))
+        dataY[i - p, :] = X[i, :]
+    return dataX, dataY
 
 def Value_from_returns(Data, results,N_pred, pred_meth, perc_var):
 
@@ -67,7 +80,7 @@ def thetas_comparison(thetas_true,thetas_pred):
         f1_score[i] = ss['f1']
         print(mcc[i])
 
-    return np.mean(mcc),np.mean(f1_score)
+    return np.mean(mcc),np.std(mcc)
 
 
 
@@ -159,7 +172,7 @@ def pred_HMM_GMM(returns,data,alpha_list, clus_list, N_test=100, columns = None,
 
     for i in range(N_test):
 
-        N_obs_train = N_obs - N_test + i
+        N_obs_train = N_obs - N_test + i + 1
 
         if i == 0 or pred_meth == 'rolling':
 
@@ -178,7 +191,7 @@ def pred_HMM_GMM(returns,data,alpha_list, clus_list, N_test=100, columns = None,
                                    X_train,
                                    params={'alpha': alpha_list,
                                            'n_clusters': clus_list},
-                                   n_repetitions=3)
+                                   n_repetitions=1)
 
         hmm_gmm = HMM_GraphicalLasso(alpha=res[0][0], n_clusters=res[0][1], verbose=False, mode='scaled',
                                      warm_restart=True, repetitions=5, n_jobs=-1)
@@ -187,15 +200,22 @@ def pred_HMM_GMM(returns,data,alpha_list, clus_list, N_test=100, columns = None,
 
         # real
 
-        Y_real[i, :] = returns[N_obs_train, :]
+        Y_real[i, :] = returns[N_obs_train-1, :]
 
         # predictions
-        X_new = hmm_gmm.predict(X_train, method=meth)['pred']
-        Y_HMM_GMM_pred[i, :] = hmm_gmm.predict(X_train, method=meth)['pred']
-        stds_pred[str(i)] = hmm_gmm.predict(X_train, method=meth)['stds']
-        cov_pred[str(i)] = hmm_gmm.predict(X_train, method=meth)['cov']
-        prec_pred[str(i)] = hmm_gmm.predict(X_train, method=meth)['prec']
-        means_pred[str(i)] = hmm_gmm.predict(X_train, method=meth)['means']
+
+        pred_res = hmm_gmm.predict(X_train, method=meth)
+        state = pred_res['state']
+
+
+        # organization for regression
+
+        X_new = pred_res['pred']
+        Y_HMM_GMM_pred[i, :] = pred_res['pred']
+        stds_pred[str(i)] = pred_res['stds']
+        cov_pred[str(i)] = pred_res['cov']
+        prec_pred[str(i)] = pred_res['prec']
+        means_pred[str(i)] = pred_res['means']
 
     results = [Y_HMM_GMM_pred,
                Y_real,
@@ -208,6 +228,141 @@ def pred_HMM_GMM(returns,data,alpha_list, clus_list, N_test=100, columns = None,
         plot_pred(data[1:,:], results, N_test, pred_meth,columns, mem_days, N_per_rows, figsizex, figsizey, perc_var)
 
     return results
+
+
+def CV_reg_HMM_GGM(model,X,alpha_list, cluster_list,N_val,meth):
+
+    N_obs,_ = X.shape
+    results = []
+    par_list = []
+
+    for a in tqdm(alpha_list):
+        for c in tqdm(cluster_list):
+
+            model.alpha = a
+            model.n_clusters = c
+
+            Y_HMM_GMM_pred = np.zeros(N_val)
+            MAE_HMM_GMM_pred = np.zeros(N_val)
+
+            for i in range(N_val):
+
+                N_obs_train = N_obs - N_val + i
+                X_train = X[:N_obs_train, :]
+
+
+                # training
+
+                X_traning = X_train[:-1, :]
+
+                # val
+                X_pred = X_train[-1, :]
+
+                model.fit(X_traning)
+                pred_res = model.predict(X_traning, method=meth)
+                Prec_pred = pred_res['prec'][:-1, :-1]
+                Cov_row_pred = pred_res['cov'][:, -1]
+                mean_out_pred = pred_res['means']
+                Y_HMM_GMM_pred[i] = mean_out_pred[-1] + np.dot(np.dot((X_pred[:-1] - mean_out_pred[:-1]), Prec_pred),
+                                                                  Cov_row_pred[:-1])
+
+                MAE_HMM_GMM_pred[i] = np.abs(Y_HMM_GMM_pred[i] - X_pred[-1])
+
+            results.append(np.mean(MAE_HMM_GMM_pred))
+            par_list.append((a, c))
+
+    print(par_list[np.nanargmin(results)])
+    print(np.min(results))
+
+    return [par_list[np.nanargmin(results)]]
+
+
+
+
+def reg_pred_HMM_GMM(returns,data,alpha_list, clus_list,N_val=10, p=2, N_test=100, meth='viterbi', pred_meth='rolling',
+                     N_retrain = 5 ,recrossval=True, perc_var=False,CV_meth = 'probabil'):
+
+    N_obs = np.size(returns, axis=0)
+    Y_HMM_GMM_pred = np.zeros((N_test, np.size(returns, axis=1)))
+    Err_HMM_GMM_pred = np.zeros((N_test, np.size(returns, axis=1)))
+    Value_pred = np.zeros((N_test, np.size(returns, axis=1)))
+    Value_real = np.zeros((N_test, np.size(returns, axis=1)))
+
+    for i in range(N_test):
+
+        N_obs_train = N_obs - N_test + i+1
+
+        if i == 0 or pred_meth == 'rolling':
+
+            X_train = returns[:N_obs_train, :]
+            pred = data[N_obs_train - 2, :]
+
+        else:
+
+            pred = Value_pred[i - 1, :]
+            X_train = np.vstack((X_train, X_new))
+
+        X, MultiY = prepare_data_to_predict(X_train, p=p)
+
+        # training - validation subdivision
+
+        X_traning = X[:-1, :]
+        Y_training = MultiY[:-1, :]
+
+        # prediction
+        X_pred = X[-1, :]
+
+        for j in range(np.size(MultiY, axis=1)):
+
+            print('Prev',i, 'Var', j)
+
+
+            X_temp = np.column_stack((X_traning,Y_training[:,j]))
+
+            if i == 0 or recrossval or (pred_meth == 'rolling' and np.remainder(i,N_retrain)== 0):
+
+                mdl = HMM_GraphicalLasso(alpha=1, n_clusters=3, verbose=False, mode='scaled',
+                                         warm_restart=True, repetitions=5, n_jobs=-1)
+
+                if CV_meth == 'probabil':
+                    res = cross_validation(mdl,
+                                           X_temp,
+                                           params={'alpha': alpha_list,
+                                                   'n_clusters': clus_list},
+                                           n_repetitions=1)
+                else:
+                    res  =  CV_reg_HMM_GGM(mdl,
+                                           X_temp,
+                                           alpha_list,
+                                           clus_list,
+                                           N_val,
+                                           meth)
+
+
+            hmm_gmm = HMM_GraphicalLasso(alpha=res[0][0], n_clusters=res[0][1], verbose=False, mode='scaled',
+                                         warm_restart=True, repetitions=5, n_jobs=-1)
+
+            hmm_gmm.fit(X_temp)
+            pred_res = hmm_gmm.predict(X_temp, method=meth)
+            Prec_pred = pred_res['prec'][:-1,:-1]
+            Cov_row_pred = pred_res['cov'][:,-1]
+            mean_out_pred = pred_res['means']
+            Y_HMM_GMM_pred[i, j] = mean_out_pred[-1] +np.dot(np.dot((X_pred-mean_out_pred[:-1]), Prec_pred), Cov_row_pred[:-1])
+            print('MAE pred',i,'Var',j,':',np.abs(Y_HMM_GMM_pred[i, j]-MultiY[-1, j]))
+            Err_HMM_GMM_pred[i, j] = np.sqrt(Cov_row_pred[-1] +np.dot(np.dot(Cov_row_pred[:-1], Prec_pred), Cov_row_pred[:-1]))
+
+            if perc_var:
+                Value_pred[i, j] = pred[j] * Y_HMM_GMM_pred[i, j] / 100 + pred[j]
+
+            else:
+                Value_pred[i, j] = pred[j] + Y_HMM_GMM_pred[i, j]
+
+
+
+        X_new = Y_HMM_GMM_pred[i, :].reshape(1, np.size(returns, axis=1))
+
+    return Y_HMM_GMM_pred,Err_HMM_GMM_pred,Value_pred
+
 
 def pred_from_N_past_days(returns,data,N_past_days,N_test=100,pred_meth = 'rolling',columns = None,plot=True, mem_days=10,
                           N_per_rows=2, figsizex=10,figsizey=20, perc_var=False):
@@ -223,7 +378,7 @@ def pred_from_N_past_days(returns,data,N_past_days,N_test=100,pred_meth = 'rolli
 
     for i in range(N_test):
 
-        N_obs_train = N_obs - N_test + i
+        N_obs_train = N_obs - N_test + i+1
 
         if i == 0 or pred_meth == 'rolling':
 
@@ -235,7 +390,7 @@ def pred_from_N_past_days(returns,data,N_past_days,N_test=100,pred_meth = 'rolli
 
         # real
 
-        Y_real[i, :] = returns[N_obs_train, :]
+        Y_real[i, :] = returns[N_obs_train-1, :]
 
         # predictions
         means_pred[str(i)] = np.mean(X_train, axis=0)

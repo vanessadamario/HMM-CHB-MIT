@@ -3,13 +3,9 @@ import numpy as np
 from keras.models import Sequential
 from keras.layers import Dense
 from keras.layers import LSTM
-from matplotlib import pyplot
 from statsmodels.tsa.api import VAR
-import statsmodels.api as sm
 from sklearn.model_selection import GridSearchCV
 from sklearn.kernel_ridge import KernelRidge
-from regain.hmm.hmm_graphical_lasso import HMM_GraphicalLasso
-from regain.hmm.utils import cross_validation,results_recap
 import matplotlib.pyplot as plt
 
 
@@ -105,6 +101,7 @@ def pred_regression_methods(Data,returns, N_test=100,method= 'lgb', N_val = 10, 
                 Y_pred[i, j] = gbm.predict(X_pred, num_iteration=gbm.best_iteration)[0]
 
             elif method == 'LSTM':
+
                 # reshape input to be 3D [samples, timesteps, features]
                 train_X = X_train1.reshape((X_train1.shape[0], 1, X_train1.shape[1]))
                 val_X = X_val.reshape((X_val.shape[0], 1, X_val.shape[1]))
@@ -126,10 +123,9 @@ def pred_regression_methods(Data,returns, N_test=100,method= 'lgb', N_val = 10, 
 
             elif method == 'VAR':
 
-                model = VAR(X_train)
-                results = model.fit(maxlags=15, ic='aic')
-                lag_order = results.k_ar
-                Y_pred[i, :] = results.forecast(X_train[-lag_order:], 1)
+                model = VAR(X_train[:-1,:])
+                results = model.fit(p)
+                Y_pred[i, :] = results.forecast(X_train[-(p+1):-1,:], 1)
 
             elif method == 'Kernel_RBF':
 
