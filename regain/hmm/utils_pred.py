@@ -279,14 +279,87 @@ def CV_reg_HMM_GGM(model,X,alpha_list, cluster_list,N_val,meth):
 
 
 
+def CV_and_pred(i,j,recrossval,pred_meth,N_retrain,alpha_list,clus_list,N_val,meth,Value_pred,CV_meth,
+                X_traning, Y_training,X_pred,Y_HMM_GMM_pred,Err_HMM_GMM_pred,MultiY,perc_var,pred,single_var,al,cl):
+
+
+
+    X_temp = np.column_stack((X_traning, Y_training[:, j]))
+
+    if i == 0 or recrossval or (pred_meth == 'rolling' and np.remainder(i, N_retrain) == 0):
+
+        mdl = HMM_GraphicalLasso(alpha=1, n_clusters=3, verbose=False, mode='scaled',
+                                 warm_restart=True, repetitions=5, n_jobs=-1)
+
+        if CV_meth == 'probabil':
+            res = cross_validation(mdl,
+                                   X_temp,
+                                   params={'alpha': alpha_list,
+                                           'n_clusters': clus_list},
+                                   n_repetitions=1)
+        else:
+            res = CV_reg_HMM_GGM(mdl,
+                                 X_temp,
+                                 alpha_list,
+                                 clus_list,
+                                 N_val,
+                                 meth)
+        al = res[0][0]
+        cl = res[0][1]
+
+    hmm_gmm = HMM_GraphicalLasso(alpha=al, n_clusters=cl, verbose=False, mode='scaled',
+                                 warm_restart=True, repetitions=5, n_jobs=-1)
+
+    hmm_gmm.fit(X_temp)
+    pred_res = hmm_gmm.predict(X_temp, method=meth)
+    Prec_pred = pred_res['prec'][:-1, :-1]
+    Cov_row_pred = pred_res['cov'][:, -1]
+    mean_out_pred = pred_res['means']
+
+    if single_var:
+
+        Y_HMM_GMM_pred[i] = mean_out_pred[-1] + np.dot(np.dot((X_pred - mean_out_pred[:-1]), Prec_pred),
+                                                          Cov_row_pred[:-1])
+        print('MAE pred', i, 'Var', j, ':', np.abs(Y_HMM_GMM_pred[i] - MultiY[-1, j]))
+        Err_HMM_GMM_pred[i] = np.sqrt(
+            Cov_row_pred[-1] + np.dot(np.dot(Cov_row_pred[:-1], Prec_pred), Cov_row_pred[:-1]))
+
+        if perc_var:
+            Value_pred[i] = pred[j] * Y_HMM_GMM_pred[i] / 100 + pred[j]
+        else:
+            Value_pred[i] = pred[j] + Y_HMM_GMM_pred[i]
+
+
+    else:
+
+        Y_HMM_GMM_pred[i, j] = mean_out_pred[-1] + np.dot(np.dot((X_pred - mean_out_pred[:-1]), Prec_pred),
+                                                          Cov_row_pred[:-1])
+        print('MAE pred', i, 'Var', j, ':', np.abs(Y_HMM_GMM_pred[i, j] - MultiY[-1, j]))
+        Err_HMM_GMM_pred[i, j] = np.sqrt(Cov_row_pred[-1] + np.dot(np.dot(Cov_row_pred[:-1], Prec_pred), Cov_row_pred[:-1]))
+
+        if perc_var:
+            Value_pred[i, j] = pred[j] * Y_HMM_GMM_pred[i, j] / 100 + pred[j]
+
+        else:
+            Value_pred[i, j] = pred[j] + Y_HMM_GMM_pred[i, j]
+
+    return Y_HMM_GMM_pred,Err_HMM_GMM_pred,Value_pred,al,cl
+
+
+
+
 def reg_pred_HMM_GMM(returns,data,alpha_list, clus_list,N_val=10, p=2, N_test=100, meth='viterbi', pred_meth='rolling',
-                     N_retrain = 5 ,recrossval=True, perc_var=False,CV_meth = 'probabil'):
+                     N_retrain = 5 ,recrossval=True, perc_var=False,CV_meth = 'probabil',single_var = False,var=2):
 
     N_obs = np.size(returns, axis=0)
-    Y_HMM_GMM_pred = np.zeros((N_test, np.size(returns, axis=1)))
-    Err_HMM_GMM_pred = np.zeros((N_test, np.size(returns, axis=1)))
-    Value_pred = np.zeros((N_test, np.size(returns, axis=1)))
-    Value_real = np.zeros((N_test, np.size(returns, axis=1)))
+    if single_var:
+        Value_pred = np.zeros(N_test)
+        Y_HMM_GMM_pred = np.zeros(N_test)
+        Err_HMM_GMM_pred = np.zeros(N_test)
+    else:
+        Value_pred = np.zeros((N_test, np.size(returns, axis=1)))
+        Y_HMM_GMM_pred = np.zeros((N_test, np.size(returns, axis=1)))
+        Err_HMM_GMM_pred = np.zeros((N_test, np.size(returns, axis=1)))
 
     for i in range(N_test):
 
@@ -297,10 +370,10 @@ def reg_pred_HMM_GMM(returns,data,alpha_list, clus_list,N_val=10, p=2, N_test=10
             X_train = returns[:N_obs_train, :]
             pred = data[N_obs_train - 2, :]
 
-        else:
-
-            pred = Value_pred[i - 1, :]
-            X_train = np.vstack((X_train, X_new))
+        # else:
+        #
+        #     pred = Value_pred[i - 1, :]
+        #     X_train = np.vstack((X_train, X_new))
 
         X, MultiY = prepare_data_to_predict(X_train, p=p)
 
@@ -312,54 +385,34 @@ def reg_pred_HMM_GMM(returns,data,alpha_list, clus_list,N_val=10, p=2, N_test=10
         # prediction
         X_pred = X[-1, :]
 
-        for j in range(np.size(MultiY, axis=1)):
-
-            print('Prev',i, 'Var', j)
-
-
-            X_temp = np.column_stack((X_traning,Y_training[:,j]))
-
-            if i == 0 or recrossval or (pred_meth == 'rolling' and np.remainder(i,N_retrain)== 0):
-
-                mdl = HMM_GraphicalLasso(alpha=1, n_clusters=3, verbose=False, mode='scaled',
-                                         warm_restart=True, repetitions=5, n_jobs=-1)
-
-                if CV_meth == 'probabil':
-                    res = cross_validation(mdl,
-                                           X_temp,
-                                           params={'alpha': alpha_list,
-                                                   'n_clusters': clus_list},
-                                           n_repetitions=1)
-                else:
-                    res  =  CV_reg_HMM_GGM(mdl,
-                                           X_temp,
-                                           alpha_list,
-                                           clus_list,
-                                           N_val,
-                                           meth)
+        if i==0:
+            al = 0
+            cl = 2
 
 
-            hmm_gmm = HMM_GraphicalLasso(alpha=res[0][0], n_clusters=res[0][1], verbose=False, mode='scaled',
-                                         warm_restart=True, repetitions=5, n_jobs=-1)
+        if single_var:
 
-            hmm_gmm.fit(X_temp)
-            pred_res = hmm_gmm.predict(X_temp, method=meth)
-            Prec_pred = pred_res['prec'][:-1,:-1]
-            Cov_row_pred = pred_res['cov'][:,-1]
-            mean_out_pred = pred_res['means']
-            Y_HMM_GMM_pred[i, j] = mean_out_pred[-1] +np.dot(np.dot((X_pred-mean_out_pred[:-1]), Prec_pred), Cov_row_pred[:-1])
-            print('MAE pred',i,'Var',j,':',np.abs(Y_HMM_GMM_pred[i, j]-MultiY[-1, j]))
-            Err_HMM_GMM_pred[i, j] = np.sqrt(Cov_row_pred[-1] +np.dot(np.dot(Cov_row_pred[:-1], Prec_pred), Cov_row_pred[:-1]))
+            j = var
+            print('Prev', i, 'Var', j)
 
-            if perc_var:
-                Value_pred[i, j] = pred[j] * Y_HMM_GMM_pred[i, j] / 100 + pred[j]
+            Y_HMM_GMM_pred,Err_HMM_GMM_pred,Value_pred,al,cl = CV_and_pred(i, j, recrossval, pred_meth, N_retrain,
+                                                                           alpha_list, clus_list, N_val, meth,
+                                                                           Value_pred, CV_meth, X_traning, Y_training,
+                                                                           X_pred, Y_HMM_GMM_pred,Err_HMM_GMM_pred,
+                                                                           MultiY, perc_var, pred,single_var,al,cl)
 
-            else:
-                Value_pred[i, j] = pred[j] + Y_HMM_GMM_pred[i, j]
+        else:
+            for j in range(np.size(MultiY, axis=1)):
 
+                print('Prev',i, 'Var', j)
 
+                Y_HMM_GMM_pred,Err_HMM_GMM_pred,Value_pred,al,cl = CV_and_pred(i, j, recrossval, pred_meth, N_retrain,
+                                                                               alpha_list, clus_list, N_val, meth,
+                                                                               Value_pred, CV_meth,X_traning, Y_training,
+                                                                               X_pred, Y_HMM_GMM_pred,Err_HMM_GMM_pred,
+                                                                               MultiY, perc_var, pred,single_var,al,cl)
 
-        X_new = Y_HMM_GMM_pred[i, :].reshape(1, np.size(returns, axis=1))
+        #X_new = Y_HMM_GMM_pred[i, :].reshape(1, np.size(returns, axis=1))
 
     return Y_HMM_GMM_pred,Err_HMM_GMM_pred,Value_pred
 

@@ -428,9 +428,11 @@ class HMM_GraphicalLasso(GraphicalLasso):
         if method == 'viterbi':
             results = viterbi_path(self.pis_, self.probabilities_,
                                    self.state_change, self.mode)
-            state = np.random.choice(np.arange(self.n_clusters),
-                                     replace=True,
-                                     p=self.state_change[int(results[-1]), :])
+            # state = np.random.choice(np.arange(self.n_clusters),
+            #                          replace=True,
+            #                          p=self.state_change[int(results[-1]), :])
+            state = int(results[-1])
+
             sample = np.random.multivariate_normal(self.means_[state],
                                                    self.covariances_[state], 1)
 
