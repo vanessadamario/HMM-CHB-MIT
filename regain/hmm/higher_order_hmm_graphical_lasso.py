@@ -120,6 +120,8 @@ def hhmm_graphical_lasso(X,
                         pis,
                         means,
                         covariances,
+                        K=3, 
+                        nu=2,
                         alpha=0.1,
                         max_iter=100,
                         mode='scaled',
@@ -128,10 +130,8 @@ def hhmm_graphical_lasso(X,
                         tol=5e-3,
                         m=1,
                         r=2):
-
-    nu=max([m,r])
-    K = int(pis.shape[0]**(1/nu))
     N, d = X.shape
+    print(K**nu)
     probabilities = np.zeros((N, int(K**nu)))
     for k in range(int(K**nu)):
         try:
@@ -330,11 +330,10 @@ class HHMM_GraphicalLasso(HMM_GraphicalLasso):
 
         N, d = X.shape
         K = self.n_clusters
-
         def _to_parallelize(X, K, init_params, alpha, max_iter, mode, verbose,
                             warm_restart, tol,nu,N_memory_trans,N_memory_emis):
             means, covariances, A, pis = _initialization(X, K, init_params, alpha, nu)
-
+            print(means.shape)
             thetas, means, covariances, A, pis, gammas, probabilities, alphas,\
             betas, xi, emp_cov, lambdas,likelihood_ = hhmm_graphical_lasso(
                                                                           X,
@@ -342,14 +341,16 @@ class HHMM_GraphicalLasso(HMM_GraphicalLasso):
                                                                           pis,
                                                                           means,
                                                                           covariances,
+                                                                          K = K, 
+                                                                          nu= nu, 
                                                                           alpha=alpha,
                                                                           max_iter=max_iter,
                                                                           verbose=verbose,
                                                                           mode=mode,
                                                                           warm_restart=warm_restart,
                                                                           tol=tol,
-                                                                          r=N_memory_trans,
-                                                                          m=N_memory_emis
+                                                                          m=N_memory_trans,
+                                                                          r=N_memory_emis
                                                                           )
             return thetas, means, covariances, A, pis, gammas, probabilities,\
                    alphas, betas, xi, emp_cov, lambdas,likelihood_
