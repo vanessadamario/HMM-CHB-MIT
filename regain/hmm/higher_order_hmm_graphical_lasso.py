@@ -69,32 +69,39 @@ def TransMatrixInit(method,K, nu):
     return A
 
 def ImSet(K,i,nu,m):
-    lower = np.floor(i / (K ** (nu - m))) * K ** (nu - m)
-    upper = (np.floor(i / (K ** (nu - m))) + 1) * K ** (nu - m)
-    return list(range(int(lower), int(upper)))
+    lower = int(np.floor(i / (K ** (nu - m))) * K ** (nu - m))
+    upper = int((np.floor(i / (K ** (nu - m))) + 1) * K ** (nu - m))
+    return list(range(lower, upper))
 
 
-def _initialization(X, K, init_params, alpha,nu ):
+def _initialization(X, K, init_params, alpha,nu,N_memory_emis):
+
     N, d = X.shape
     means = np.zeros((K**nu, d))
     thetas = []
-
     # Initialization
     init_type = init_params.get('clustering', None)
     if init_type is None or str(init_type).lower() == 'kmeans':
-        clusters = KMeans(n_clusters=K**nu).fit(X).labels_
-        for i, l in enumerate(np.unique(clusters)):
-            means[i, :] = np.mean(X[np.where(clusters == l)[0], :], axis=0)
-            emp_cov = empirical_covariance(X - means[i, :],
-                                           assume_centered=True)
-            thetas.append(graphical_lasso(emp_cov, alpha=alpha)[0])
-            covariances = [np.linalg.pinv(t) for t in thetas]
+        clusters = KMeans(n_clusters=K).fit(X).labels_
+        for i in range(K):
+            #cluster_label = int(np.floor(i / (K ** (nu - N_memory_emis))))
+            N_cluster = np.size(np.where(clusters == i)[0])
+            Obs_cluster = X[np.where(clusters == i)[0],:]
+            means[i, :] = np.mean(Obs_cluster, axis=0)
+            emp_cov = empirical_covariance(Obs_cluster - means[i, :],assume_centered=True)
+            thetas.append(graphical_lasso(emp_cov, alpha=alpha/N_cluster)[0])
+        covariances = [np.linalg.pinv(t) for t in thetas]
     elif str(init_type).lower() == 'gmm':
-        gmm = GaussianMixture(n_components=K**nu).fit(X)
+        gmm = GaussianMixture(n_components=K).fit(X)
+        clusters = gmm.labels_
         means = gmm.means_
-        covariances = []
-        for i in range(K**nu):
-            covariances.append(gmm.covariances_[i])
+        for i in range(K):
+            #cluster_label = int(np.floor(i / (K ** (nu - N_memory_emis))))
+            N_cluster = np.size(np.where(clusters == i)[0])
+            means[i, :] =  gmm.means_[i,:]
+            thetas.append(graphical_lasso(gmm.covariances_[i], alpha=alpha/N_cluster)[0])
+        covariances = [np.linalg.pinv(t) for t in thetas]
+
     else:
         raise ValueError('Unexpected value for clusters initialisations. '
                          'Options are kmeans and ggm, found' + str(init_type))
@@ -128,17 +135,14 @@ def hhmm_graphical_lasso(X,
                         verbose=0,
                         warm_restart=False,
                         tol=5e-3,
-                        m=1,
-                        r=2):
+                        r=2,
+                        m=1):
     N, d = X.shape
-    print(K**nu)
     probabilities = np.zeros((N, int(K**nu)))
-    for k in range(int(K**nu)):
-        try:
-            probabilities[:, k] = multivariate_normal.pdf(X, mean=means[k, :], cov=covariances[k])
-        except:
-            out = np.repeat(np.nan, 13)  # Questo perche' dovrebbe succedere?
-            return out
+    for k in range(K):
+        temp =np.array([list(multivariate_normal.pdf(X, mean=means[k, :],
+                                                     cov=covariances[k])), ] * K ** (nu - m)).transpose()
+        probabilities[:, k*K ** (nu - m):(k+1)*K ** (nu - m)] = temp
 
     likelihood_ = -np.inf
     thetas = []
@@ -168,63 +172,61 @@ def hhmm_graphical_lasso(X,
 
         # M-step
         pis = gammas[0, :] / np.sum(gammas[0, :])
-        lambdas = np.zeros(int(K**nu))
+        lambdas = np.zeros(K)
         thetas_old = thetas
         thetas = []
         emp_cov = []
         for j in range(int(K**nu)):
             Ir = ImSet(K,j,nu,r)
-            for k in range(int(K**nu)):
+            K_filt = (kk for kk in range(int(K ** nu)) if
+                      np.floor((j) / K) == (kk) - np.floor((kk) / (K ** (nu - 1))) * K ** (nu - 1))
+
+            for k in K_filt:
                 xi_sum = np.zeros(N-1)
                 gammas_sum =  np.zeros(N-1)
+                for kk in Ir:
+                    xi_sum = xi_sum + xi[:, kk, int(np.floor((kk)/K)+np.floor((k)/(K**(nu-1)))*K**(nu-1))]
+                    gammas_sum = gammas_sum + gammas[:-1,kk]
+                A[j, k] = np.sum(xi_sum) / np.sum(gammas_sum)
 
-                if np.floor((j)/K)==(k)-np.floor((k)/(K**(nu-1)))*K**(nu-1):
-                    for kk in Ir:
-                        kkto = np.floor((kk)/K)+np.floor((k)/(K**(nu-1)))*K**(nu-1)
-                        xi_sum = xi_sum + xi[:, kk, int(kkto)]
-                        gammas_sum = gammas_sum + gammas[:-1,kk]
-                    A[j, k] = np.sum(xi_sum) / np.sum(gammas_sum)
-                else:
-                    A[j, k] = 0
-            Im = ImSet(K, j, nu, m)
-            gammas_sum_m = np.zeros(N)
-            for km in Im:
-                gammas_sum_m = gammas_sum_m + gammas[:, km]
+            if j % K ** (nu - m)==0:
 
-            lambdas[j] = alpha/ np.sum(gammas_sum_m)
-            means[j, :] = np.sum(gammas_sum_m[:, np.newaxis] * X, axis=0) / np.sum(gammas_sum_m)
+                Im = ImSet(K, j, nu, m)
+                jj = int(j/K ** (nu - m))
+                gammas_sum_m = np.zeros(N)
+                for km in Im:
+                    gammas_sum_m = gammas_sum_m + gammas[:, km]
 
-            S_k = (gammas_sum_m[:, np.newaxis]* (X - means[j, :])).T.dot(X - means[j, :]) / np.sum(gammas_sum_m)
-            emp_cov.append(S_k)
-            with warnings.catch_warnings():
-                warnings.simplefilter("ignore")
-                if warm_restart and iter_ > 0:
+                lambdas[jj] = alpha/ np.sum(gammas_sum_m)
+                means[jj, :] = np.sum(gammas_sum_m[:, np.newaxis] * X, axis=0) / np.sum(gammas_sum_m)
 
-                    try:
+                S_k = (gammas_sum_m[:, np.newaxis]* (X - means[jj, :])).T.dot(X - means[jj, :]) / np.sum(gammas_sum_m)
+                emp_cov.append(S_k)
+                with warnings.catch_warnings():
+                    warnings.simplefilter("ignore")
+                    if warm_restart and iter_ > 0:
+
                         thetas.append(
-                        graphical_lasso(S_k,
-                                        alpha=lambdas[j],
-                                        init=thetas_old[j])[0])
-                    except:
-                        out = np.repeat(np.nan,13)
-                        return out
+                            graphical_lasso(S_k,
+                                            alpha=lambdas[jj],
+                                            init=thetas_old[jj])[0])
+                    else:
+                        thetas.append(graphical_lasso(S_k, alpha=lambdas[jj])[0])
 
-                else:
-
-                    try:
-                        thetas.append(graphical_lasso(S_k, alpha=lambdas[j])[0])
-                    except:
-                        out = np.repeat(np.nan,13)
-                        return out
 
 
         covariances = [np.linalg.pinv(t) for t in thetas]
+        #print('trans',A)
+        #print('iter', iter_, 'cov', means)
         #print('iter',iter_,'cov',covariances)
-        probabilities = np.zeros((N, int(K**nu)))
-        for k in range(int(K**nu)):
-            probabilities[:, k] = multivariate_normal.pdf(X, mean=means[k, :], cov=covariances[k])
 
-        # print(A)
+        probabilities = np.zeros((N, int(K**nu)))
+        for k in range(K):
+            temp = np.array([list(multivariate_normal.pdf(X, mean=means[k, :],
+                                                          cov=covariances[k])), ] * K ** (nu - m)).transpose()
+            probabilities[:, k * K ** (nu - m):(k + 1) * K ** (nu - m)] = temp
+
+        #print(iter_)
         likelihood_old = likelihood_
         likelihood_ = compute_likelihood(gammas, pis, xi, A, probabilities)
         if verbose:
@@ -332,8 +334,9 @@ class HHMM_GraphicalLasso(HMM_GraphicalLasso):
         K = self.n_clusters
         def _to_parallelize(X, K, init_params, alpha, max_iter, mode, verbose,
                             warm_restart, tol,nu,N_memory_trans,N_memory_emis):
-            means, covariances, A, pis = _initialization(X, K, init_params, alpha, nu)
-            print(means.shape)
+
+            means, covariances, A, pis = _initialization(X, K, init_params, alpha, nu,N_memory_emis)
+
             thetas, means, covariances, A, pis, gammas, probabilities, alphas,\
             betas, xi, emp_cov, lambdas,likelihood_ = hhmm_graphical_lasso(
                                                                           X,
@@ -349,9 +352,8 @@ class HHMM_GraphicalLasso(HMM_GraphicalLasso):
                                                                           mode=mode,
                                                                           warm_restart=warm_restart,
                                                                           tol=tol,
-                                                                          m=N_memory_trans,
-                                                                          r=N_memory_emis
-                                                                          )
+                                                                          r=N_memory_trans,
+                                                                          m=N_memory_emis)
             return thetas, means, covariances, A, pis, gammas, probabilities,\
                    alphas, betas, xi, emp_cov, lambdas,likelihood_
 
