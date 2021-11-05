@@ -39,7 +39,7 @@ import numpy as np
 from regain.covariance.kernel_time_graphical_lasso_ import (
     KernelTimeGraphicalLasso, kernel_time_graphical_lasso)
 from regain.covariance.missing_graphical_lasso_ import (
-    MissingGraphicalLasso, _compute_mean, compute_cs,
+    MissingGraphicalLasso, compute_mean, compute_cs,
     compute_empirical_covariance)
 from regain.covariance.time_graphical_lasso_ import loss
 from regain.norm import l1_norm
@@ -119,7 +119,8 @@ def missing_multiple_graphical_lasso(X,
         for the primal and dual residual norms at each iteration.
 
     """
-    n_times, n_samples, d = X.shape
+    n_times = len(X)
+    _, d = X[0].shape
     K = np.zeros((n_times, d, d))
     means = np.zeros((n_times, d))
 
@@ -128,16 +129,15 @@ def missing_multiple_graphical_lasso(X,
     for iter_ in range(max_iter):
         old_logl = loglik
 
-        cs = np.array([
-            _compute_cs(means[t, :], K[t, :, :], X[t, :, :])
-            for t in range(n_times)
-        ])
-        means = np.array(
-            [_compute_mean(X[t, :, :], cs[t, :, :]) for t in range(n_times)])
+        cs = [
+            compute_cs(means[t], K[t, :, :], X[t])
+            for t in range(n_times)]
+        means = [compute_mean(X[t], cs[t]) for t in range(n_times)]
         emp_cov = np.array([
-            _compute_empirical_covariance(X[t, :, :], K[t, :, :], cs[t, :, :])
+            compute_empirical_covariance(X[t], K[t, :, :], cs[t])
             for t in range(n_times)
         ])
+        print(emp_cov.shape)
         K = kernel_time_graphical_lasso(emp_cov,
                                         alpha=alpha,
                                         rho=rho,
@@ -310,7 +310,7 @@ def latent_multiple_graphical_lasso(emp_cov,
     return returns
 
 
-class LatentMultipleGraphicalLasso(LatentMissingGraphicalLasso,
+class LatentMultipleGraphicalLasso(MissingGraphicalLasso,
                                    KernelTimeGraphicalLasso):
     """Graphical Lasso with missing data as latent variables.
 
@@ -629,7 +629,7 @@ class MissingMultipleGraphicalLasso(KernelTimeGraphicalLasso):
                          estimator=self,
                          force_all_finite='allow-nan')
         self.classes_, n_samples = np.unique(y, return_counts=True)
-        X = np.array([X[y == cl] for cl in self.classes_])
+        X = [X[np.where(y == cl)[0], :] for cl in self.classes_]
         self.precision_, self.covariance_, self.mean_, \
             self.complete_data_matrix_, \
             self.n_iter_ = missing_multiple_graphical_lasso(
