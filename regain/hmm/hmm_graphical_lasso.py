@@ -109,6 +109,7 @@ def compute_likelihood(gammas, pis, xi, A, probabilities):
 
 
 def _initialization(X, K, init_params, alpha):
+
     N, d = X.shape
     means = np.zeros((K, d))
     thetas = []
@@ -119,24 +120,25 @@ def _initialization(X, K, init_params, alpha):
         clusters = KMeans(n_clusters=K).fit(X).labels_
 
         for i, l in enumerate(np.unique(clusters)):
-            means[i, :] = np.mean(X[np.where(clusters == l)[0], :], axis=0)
-            emp_cov = empirical_covariance(X - means[i, :],
-                                           assume_centered=True)
+            N_cluster = np.size(np.where(clusters == l)[0])
+            Obs_cluster = X[np.where(clusters == l)[0],:]
+            means[i, :] = np.mean(Obs_cluster, axis=0)
+            emp_cov = empirical_covariance(Obs_cluster - means[i, :],assume_centered=True)
             if alpha == 'auto':
-                a = alpha_heuristic(emp_cov,
-                                    np.size(X[np.where(clusters == l)[0], :],
-                                            axis=0),
-                                    gamma=0.01)
+                a = alpha_heuristic(emp_cov,np.size(X[np.where(clusters == l)[0], :],axis=0),gamma=0.01)
             else:
-                a = alpha
+                a = alpha/N_cluster
             thetas.append(graphical_lasso(emp_cov, alpha=a)[0])
-            covariances = [np.linalg.pinv(t) for t in thetas]
+        covariances = [np.linalg.pinv(t) for t in thetas]
     elif str(init_type).lower() == 'gmm':
         gmm = GaussianMixture(n_components=K).fit(X)
-        means = gmm.means_
-        covariances = []
-        for i in range(K):
-            covariances.append(gmm.covariances_[i])
+        clusters = gmm.labels_
+        for i, l in enumerate(np.unique(clusters)):
+            N_cluster = np.size(np.where(clusters == l)[0])
+            means[i, :] =  gmm.means_[l,:]
+            thetas.append(graphical_lasso(gmm.covariances_[l], alpha=alpha/N_cluster)[0])
+        covariances = [np.linalg.pinv(t) for t in thetas]
+
     else:
         raise ValueError('Unexpected value for clusters initialisations. '
                          'Options are kmeans and ggm, found' + str(init_type))

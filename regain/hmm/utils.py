@@ -603,30 +603,27 @@ def cluster_returns_recap(means, covariances, labels=None):
     return df_recap
 
 
-def conversion_hhmm_results(labels, gammas, thetas, n_states, order_hmm):
+def conversion_hhmm_results(labels, gammas, thetas, n_states, order_hmm,real = False):
 
     N_samples,_ = gammas.shape
-    N_rep = int(n_states ** order_hmm / n_states)
-    stateseq = np.repeat(np.arange(n_states), N_rep)
+
 
     conv_label = np.zeros(N_samples)
     for n in range(N_samples):
-        conv_label[n] = stateseq[labels[n]]
+        conv_label[n] = int(labels[n]/n_states**(order_hmm-1))
 
-    conversion_prec = []
-    for k in range(n_states):
-        conversion_prec.append(thetas[np.where(stateseq == k)[0][0]])
+    if real:
+        conversion_prec =[]
+        for k in range(n_states):
+            conversion_prec.append(thetas[int(k*n_states**(order_hmm-1))])
+    else:
+        conversion_prec = thetas
 
     conv_gamma = np.zeros((N_samples, n_states))
 
     for n in range(N_samples):
         for k in range(n_states):
-            indk = np.where(stateseq == k)[0]
-            tempsum = 0
-            for kk in indk:
-                tempsum += gammas[n, kk]
-
-            conv_gamma[n, k] = tempsum
+            conv_gamma[n, k] = np.sum(gammas[n, k*n_states**(order_hmm-1):(k+1)*n_states**(order_hmm-1)])
 
     return conv_label, conversion_prec, conv_gamma
 
