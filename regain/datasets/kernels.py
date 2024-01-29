@@ -35,7 +35,7 @@ import numpy as np
 from scipy import linalg
 from scipy.spatial.distance import squareform
 from sklearn.cluster import AgglomerativeClustering
-from sklearn.datasets.base import Bunch
+from sklearn.datasets._base import Bunch
 
 from regain.norm import l1_od_norm
 from regain.utils import is_pos_def

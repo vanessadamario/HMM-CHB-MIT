@@ -33,7 +33,7 @@ from __future__ import division
 from functools import partial
 
 import numpy as np
-from sklearn.datasets.base import Bunch
+from sklearn.datasets._base import Bunch
 
 from .gaussian import (
     data_Meinshausen_Yuan, data_Meinshausen_Yuan_sparse_latent,
