@@ -1,5 +1,7 @@
-{
-"summaries": "/Users/vanessadamario/OneDrive - Nova Southeastern University/NSU/Research/EEG and Networks/summaries",
-"edf": "TBD",
-"output_summaries": "/Users/vanessadamario/OneDrive - Nova Southeastern University/NSU/Research/EEG and Networks/preprocessed_times"
+{"local": {"summaries": "/Users/vanessadamario/OneDrive - Nova Southeastern University/NSU/Research/EEG and Networks/summaries",
+           "edf": "TBD",
+           "output": "/Users/vanessadamario/OneDrive - Nova Southeastern University/NSU/Research/EEG and Networks/preprocessed_times"},
+ "remote": {"summaries": "/home/data/physionet.org/files/chbmit/1.0.0",
+            "edf": "/home/data/physionet.org/files/chbmit/1.0.0",
+            "output": "/home/vdamario/tmp-outputs"}   
 }

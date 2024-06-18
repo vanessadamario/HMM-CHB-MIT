@@ -192,77 +192,70 @@ class Labeling():
 
 def split_in_windows(states_times, files_times, window=10):
     # window has customizable size
-    # THERE IS A BUG: CHECK PATIENT 01 - OVERLAP AROUND 10K S DO NOT MAKE SENSE
     start_window_list = []
     end_window_list = []
     label_window_list = []
 
     for i_ in range(states_times.shape[0]):
-        if states_times.iloc[i_]['State'] == 'Ictal':
-            tmp_start = states_times.iloc[i_]['Start']
+        state = states_times.iloc[i_]['State']
+        start_state = states_times.iloc[i_]['Start']
+        stop_state = states_times.iloc[i_]['Stop']
+
+        if state == 'Ictal':
+            tmp_start = start_state # states_times.iloc[i_]['Start']
             
-            while (tmp_start + window) < states_times.iloc[i_]['Stop']:
+            while (tmp_start + window) < stop_state: # states_times.iloc[i_]['Stop']:
+                # we do not go into another file during seizure
                 start_window_list.append(tmp_start)
                 end_window_list.append(tmp_start + window)
-                tmp_start = tmp_start + window
-                label_window_list.append('Ictal')   
+                tmp_start += window
+                label_window_list.append(state)
 
         else:
-            tmp_state = states_times.iloc[i_]['State']
-            start_state = states_times.iloc[i_]['Start']
-            tmp_stop = states_times.iloc[i_]['Stop']
+            tmp_stop = stop_state # states_times.iloc[i_]['Stop']
             
             while (tmp_stop - window) >= start_state:
                 # we check if start and stop are in the same files
-                mask_start = files_times['Absolute Start Time'] <= tmp_stop - window  # need to think more about this <=
-                mask_stop = files_times['Absolute Start Time'] < tmp_stop 
+                mask_start = files_times['Absolute Start Time'] <= (tmp_stop - window)  # need to think more about this <=
+                mask_stop = files_times['Absolute Start Time'] <= tmp_stop 
                 same_file = mask_start.equals(mask_stop)
-
                 if same_file:
                     start_window_list.append(tmp_stop - window)
                     end_window_list.append(tmp_stop)
-                    label_window_list.append(tmp_state)
-                    tmp_stop = tmp_stop - window
+                    label_window_list.append(state)
+                    tmp_stop -= window
                 else:
-                    # if not, we go to the previous file
-                    tmp_stop = files_times['Absolute Start Time'][mask_start].iloc[-1]
-                    
+                    tmp_stop = files_times['Absolute End Time'][mask_start].iloc[-1]
+        
     tmp_df = pd.DataFrame(data=[label_window_list, start_window_list, end_window_list], 
                           index=['State', 'Start', 'End']).T
     tmp_df.sort_values(by='Start', inplace=True)
     return tmp_df
 
 
-def main():
+def create_files_w_times(patient, data_path, recordings_path):
+    """ 
+    This function generate two csv files containing the information of the time of start - end file 
+    and the time of the seizures
+    """
+    # print(f'Patient ID: {patient}')
+        
+    patient_data_path = join(data_path, f'chb{patient}')
+    os.makedirs(patient_data_path, exist_ok=True)
+    annotation_path = join(recordings_path, f'chb{patient}', f'chb{patient}-summary.txt')
+    SummaryPatient = Summary(path=annotation_path)
+    SummaryPatient.convert_start_end_files()
+    if patient == '10' or patient == '18': 
+        # for these two patients, the last file corresponds to the data acquisition happened on another day
+        # we remove this from the dataset
+        SummaryPatient.absolute_time =  SummaryPatient.absolute_time[:-1]
+        SummaryPatient.file_seizures = SummaryPatient.file_seizures[:-1]
+    SummaryPatient.absolute_time.to_csv(join(patient_data_path, f'start_stop_file_{patient}.csv'))
+    SummaryPatient.file_seizures.to_csv(join(patient_data_path, f'start_stop_seizure_{patient}.csv'))
 
-    patient_id = [f'0{i}' for i in range(1, 10)] + [str(i) for i in range(10, 24)]
-    json_filepaths = './../paths_to_files.json'
-    with open(json_filepaths, 'r') as f:
-        paths = json.load(f)
+    LabelPatient = Labeling(SummaryPatient)
+    LabelPatient.label_times()
+    LabelPatient.df.to_csv(join(patient_data_path, f'labeled_ts_{patient}.csv'))
     
-    summaries_path = paths['summaries']
-    output_summaries_path = paths['output_summaries']
-
-    patient_id = ['01']
-    for patient in patient_id:
-        print('\n')
-        print(f'Patient ID: {patient}')
-        annotation_path = join(summaries_path, 'chb'+patient+'-summary.txt')
-        SummaryPatient = Summary(path=annotation_path)
-        SummaryPatient.convert_start_end_files()
-        SummaryPatient.absolute_time.to_csv(join(output_summaries_path, f'start_stop_file_{patient}.csv'))
-        SummaryPatient.file_seizures.to_csv(join(output_summaries_path, f'start_stop_seizure_{patient}.csv'))
-
-        LabelPatient = Labeling(SummaryPatient)
-        LabelPatient.label_times()
-        print(LabelPatient.df)
-        LabelPatient.df.to_csv(join(output_summaries_path, f'labeled_ts_{patient}.csv'))
-
-        df_times = split_in_windows(LabelPatient.df, SummaryPatient.absolute_time, window=10)
-        df_times.to_csv(join(output_summaries_path, f'split_labeled_ts_{patient}.csv'))
-        # print(df_times)
-
-
-
-if __name__=="__main__":
-    main()
+    df_times = split_in_windows(LabelPatient.df, SummaryPatient.absolute_time, window=10)
+    df_times.to_csv(join(patient_data_path, f'split_labeled_ts_{patient}.csv'))
